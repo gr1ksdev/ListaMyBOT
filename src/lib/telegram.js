@@ -5,7 +5,7 @@ export function getTelegram() {
 
 export function isTelegramAvailable() {
   const tg = getTelegram();
-  return Boolean(tg && (tg.initData || tg.initDataUnsafe?.user));
+  return Boolean(tg && (tg.initData || tg.initDataUnsafe?.user) && tg.Serverless?.call);
 }
 
 export function initTelegramApp() {
@@ -13,8 +13,8 @@ export function initTelegramApp() {
   if (!tg) return;
 
   try {
-    tg.ready();
-    tg.expand();
+    tg.ready?.();
+    tg.expand?.();
   } catch (e) {
     console.warn('Telegram init warning:', e);
   }
@@ -39,6 +39,11 @@ export function applyTelegramTheme() {
     if (tp.button_color) root.style.setProperty('--tg-theme-button-color', tp.button_color);
     if (tp.button_text_color) root.style.setProperty('--tg-theme-button-text-color', tp.button_text_color);
     if (tp.secondary_bg_color) root.style.setProperty('--tg-theme-secondary-bg-color', tp.secondary_bg_color);
+    if (tp.header_bg_color) root.style.setProperty('--tg-theme-header-bg-color', tp.header_bg_color);
+    if (tp.section_bg_color) root.style.setProperty('--tg-theme-section-bg-color', tp.section_bg_color);
+    if (tp.section_header_text_color) root.style.setProperty('--tg-theme-section-header-text-color', tp.section_header_text_color);
+    if (tp.subtitle_text_color) root.style.setProperty('--tg-theme-subtitle-text-color', tp.subtitle_text_color);
+    if (tp.destructive_text_color) root.style.setProperty('--tg-theme-destructive-text-color', tp.destructive_text_color);
   }
 }
 
@@ -70,39 +75,81 @@ export function openTelegramLink(url) {
 }
 
 /**
+ * Wait for Telegram.WebApp.Serverless to become available if Telegram is injecting it
+ */
+async function waitForServerless(maxWaitMs = 1200) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const tg = getTelegram();
+    if (tg?.Serverless?.call) return tg;
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  return getTelegram();
+}
+
+/**
  * Call serverless backend endpoint via Telegram.WebApp.Serverless.call
- * Fallback to direct POST /api/<name> if running in browser dev or mock mode.
  */
 export async function callEndpoint(name, input = {}) {
-  const tg = getTelegram();
+  let tg = getTelegram();
+  if (!tg?.Serverless?.call) {
+    tg = await waitForServerless();
+  }
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+
+    // 20 second timeout like native bot app
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(name === 'dashboard' ? 'O servidor demorou para responder. Tente novamente.' : 'Tempo limite da operação excedido. Tente novamente.'));
+    }, 20000);
+
     if (tg?.Serverless?.call) {
-      tg.Serverless.call(name, input, (err, res) => {
-        if (err) {
-          const message = err.message || err.description || 'Erro na requisição';
-          const error = new Error(message);
-          error.type = err.type;
-          error.parameters = err.parameters;
-          return reject(error);
-        }
-        resolve(res);
-      });
-    } else {
-      // In local development or standalone browser fallback
-      fetch(`/api/${name}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      })
-        .then(async (res) => {
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(data.description || data.message || `HTTP ${res.status}`);
+      try {
+        tg.Serverless.call(name, input, (err, res) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (err) {
+            const message = err.message || err.description || 'Erro na requisição';
+            const error = new Error(message);
+            error.type = err.type;
+            error.parameters = err.parameters;
+            return reject(error);
           }
-          resolve(data);
-        })
-        .catch(reject);
+          resolve(res);
+        });
+      } catch (e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      }
+    } else {
+      clearTimeout(timer);
+      // If outside Telegram without Serverless SDK
+      reject(new Error('Abra o bot no Telegram e envie /admin para acessar o painel.'));
     }
   });
+}
+
+/**
+ * Safe settings saver that handles optimistic locking and automatic version recovery
+ */
+export async function saveSettingsSafe(settings, version, onVersionSync) {
+  try {
+    const res = await callEndpoint('saveSettings', { settings, version });
+    onVersionSync?.(version ? version + 1 : 1);
+    return res;
+  } catch (err) {
+    if (err.message && err.message.includes('As configurações mudaram')) {
+      const fresh = await callEndpoint('dashboard', {});
+      const freshVersion = fresh?.version || 1;
+      onVersionSync?.(freshVersion + 1, fresh);
+      return await callEndpoint('saveSettings', { settings, version: freshVersion });
+    }
+    throw err;
+  }
 }

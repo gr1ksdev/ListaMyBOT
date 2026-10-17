@@ -18,7 +18,7 @@ export function BottomNav({ activeTab, onTabChange, pendingCount }) {
   };
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800/80 bg-slate-950/90 backdrop-blur-xl pb-safe">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-background/95 backdrop-blur-xl pb-safe">
       <div className="mx-auto flex max-w-lg items-center justify-around px-2 py-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -29,19 +29,19 @@ export function BottomNav({ activeTab, onTabChange, pendingCount }) {
               key={tab.id}
               onClick={() => handleSelect(tab.id)}
               className={cn(
-                'group relative flex flex-1 flex-col items-center justify-center py-2 px-1 rounded-xl transition-all duration-200 cursor-pointer',
-                isActive ? 'text-sky-400 font-medium' : 'text-slate-400 hover:text-slate-200'
+                'group relative flex flex-1 flex-col items-center justify-center py-2 px-1 rounded-xl transition-all duration-150 cursor-pointer',
+                isActive ? 'text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
               )}
             >
               <div className="relative">
                 <Icon
                   className={cn(
-                    'h-5 w-5 transition-transform duration-200',
-                    isActive ? 'scale-110 text-sky-400' : 'group-hover:scale-105'
+                    'h-5 w-5 transition-transform duration-150',
+                    isActive ? 'scale-110 text-primary' : 'group-hover:scale-105'
                   )}
                 />
                 {tab.badge && (
-                  <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-slate-950 animate-in zoom-in-75">
+                  <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-background animate-in zoom-in-75">
                     {tab.badge}
                   </span>
                 )}
@@ -50,7 +50,7 @@ export function BottomNav({ activeTab, onTabChange, pendingCount }) {
                 {tab.label}
               </span>
               {isActive && (
-                <span className="absolute bottom-1 h-0.5 w-6 rounded-full bg-sky-400 animate-in fade-in zoom-in-50" />
+                <span className="absolute bottom-1 h-0.5 w-6 rounded-full bg-primary animate-in fade-in zoom-in-50" />
               )}
             </button>
           );

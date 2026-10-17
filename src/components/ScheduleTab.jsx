@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Radio,
-  Sparkles,
   Zap,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/Card';
@@ -16,10 +15,10 @@ import { Badge } from './ui/Badge';
 import { Input } from './ui/Input';
 import { Switch } from './ui/Switch';
 import { useToast } from './ui/Toast';
-import { callEndpoint, haptic } from '@/lib/telegram';
+import { callEndpoint, saveSettingsSafe, haptic } from '@/lib/telegram';
 import { displayDate, formatDate } from '@/lib/utils';
 
-export function ScheduleTab({ data, onRefresh, isDemo }) {
+export function ScheduleTab({ data, onRefresh, isDemo, onSyncVersion }) {
   const { toast } = useToast();
 
   const settings = data?.settings || {};
@@ -70,7 +69,7 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
     }
 
     if (isDemo) {
-      toast('Agendamento de envios salvo com sucesso! (Modo Demo)', 'success');
+      toast('Agendamento de envios salvo! (Modo Demo)', 'success');
       return;
     }
 
@@ -87,7 +86,7 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
           times: timesArray,
         },
       };
-      await callEndpoint('saveSettings', { settings: updated, version: data?.version });
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Agendamento de envios salvo com sucesso!', 'success');
       onRefresh?.();
     } catch (err) {
@@ -105,7 +104,7 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
       .filter(Boolean);
 
     if (remMode === 'fixed' && !timesArray.length) {
-      toast('Informe pelo menos um horário diário de remoção (ex: 06:00, 18:00)', 'error');
+      toast('Informe pelo menos um horário de remoção (ex: 06:00, 18:00)', 'error');
       return;
     }
 
@@ -127,7 +126,7 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
           times: timesArray,
         },
       };
-      await callEndpoint('saveSettings', { settings: updated, version: data?.version });
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Agendamento de remoção salvo com sucesso!', 'success');
       onRefresh?.();
     } catch (err) {
@@ -175,7 +174,7 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
 
   const handleTestList = async () => {
     if (isDemo) {
-      toast('Modo Demo: teste enviado para seu privado!', 'info');
+      toast('Modo Demo: teste enviado ao seu privado!', 'info');
       return;
     }
     try {
@@ -191,31 +190,31 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
   };
 
   return (
-    <div className="space-y-6 pb-20 animate-in fade-in duration-300">
+    <div className="space-y-4 pb-20 animate-in fade-in duration-300">
       {/* Top Banner Quick Actions */}
-      <Card className="border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950">
+      <Card className="border-white/10 bg-card">
         <CardHeader className="p-4 pb-2">
-          <CardTitle className="text-base flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold flex items-center justify-between">
             <span className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-sky-400" />
+              <Zap className="h-4 w-4 text-primary" />
               Disparos Manuais Imediatos
             </span>
-            <Badge variant="outline" className="text-xs font-mono">
+            <Badge variant="outline" className="text-xs font-mono border-white/10">
               Brasília (UTC−3)
             </Badge>
           </CardTitle>
           <CardDescription>
-            Envie ou exclua as listas dos canais e grupos aprovados a qualquer momento.
+            Envie ou exclua as listas dos canais e grupos participantes a qualquer momento.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 pt-2">
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="primary"
               size="sm"
               onClick={handleSendNow}
               disabled={triggeringSend}
-              className="shadow-sm shadow-sky-500/20"
+              className="h-8 text-xs font-semibold"
             >
               <Send className="h-3.5 w-3.5" />
               {triggeringSend ? 'Enviando...' : 'Disparar Lista Agora'}
@@ -226,7 +225,7 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
               size="sm"
               onClick={handleRemoveNow}
               disabled={triggeringRem}
-              className="border-slate-700 text-rose-400 hover:bg-rose-950/30 hover:border-rose-800"
+              className="h-8 text-xs border-white/10 text-rose-400 hover:bg-rose-500/10"
             >
               <Trash2 className="h-3.5 w-3.5" />
               {triggeringRem ? 'Excluindo...' : 'Excluir Listas Agora'}
@@ -237,9 +236,9 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
               size="sm"
               onClick={handleTestList}
               disabled={triggeringTest}
-              className="text-slate-300 hover:text-white"
+              className="h-8 text-xs text-foreground/80 hover:text-foreground"
             >
-              <Radio className="h-3.5 w-3.5 text-sky-400" />
+              <Radio className="h-3.5 w-3.5 text-primary" />
               {triggeringTest ? 'Enviando...' : 'Testar no Privado'}
             </Button>
           </div>
@@ -247,13 +246,13 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
       </Card>
 
       {/* Grid: Send Schedule & Removal Schedule */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Envio Programado Form */}
-        <Card className="border-slate-800">
-          <CardHeader>
+        <Card className="border-white/10 bg-card">
+          <CardHeader className="p-4 pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Send className="h-4 w-4 text-sky-400" />
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Send className="h-4 w-4 text-primary" />
                 Agendamento de Envios
               </CardTitle>
               <Switch
@@ -263,26 +262,26 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
               />
             </div>
             <CardDescription>
-              Disparo automático da lista para os canais participantes.
+              Disparo automático da lista para os canais.
             </CardDescription>
           </CardHeader>
 
-          <CardContent>
-            <form onSubmit={handleSaveSendSchedule} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 block">Modo de envio</label>
+          <CardContent className="p-4 pt-2">
+            <form onSubmit={handleSaveSendSchedule} className="space-y-3.5">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground/80 block">Modo de envio</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setSendMode('fixed')}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold border transition text-left cursor-pointer ${
                       sendMode === 'fixed'
-                        ? 'border-sky-500 bg-sky-500/15 text-sky-300'
-                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                        ? 'border-primary bg-primary/20 text-white'
+                        : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
                     }`}
                   >
                     <strong>Horários Fixos</strong>
-                    <span className="block text-[10px] text-slate-400 mt-0.5">Ex: 08:00, 20:00</span>
+                    <span className="block text-[10px] opacity-70 mt-0.5">Ex: 08:00, 20:00</span>
                   </button>
 
                   <button
@@ -290,19 +289,19 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
                     onClick={() => setSendMode('interval')}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold border transition text-left cursor-pointer ${
                       sendMode === 'interval'
-                        ? 'border-sky-500 bg-sky-500/15 text-sky-300'
-                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                        ? 'border-primary bg-primary/20 text-white'
+                        : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
                     }`}
                   >
                     <strong>Intervalo</strong>
-                    <span className="block text-[10px] text-slate-400 mt-0.5">A cada X minutos</span>
+                    <span className="block text-[10px] opacity-70 mt-0.5">A cada X minutos</span>
                   </button>
                 </div>
               </div>
 
               {sendMode === 'fixed' ? (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-foreground/80">
                     Horários diários (separados por vírgula)
                   </label>
                   <Input
@@ -310,41 +309,43 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
                     value={sendTimes}
                     onChange={(e) => setSendTimes(e.target.value)}
                     placeholder="08:00, 14:00, 20:00"
+                    className="h-9 bg-white/5 border-white/10"
                   />
-                  <p className="text-[11px] text-slate-400">Horário oficial de Brasília (UTC−3).</p>
+                  <p className="text-[11px] text-muted-foreground">Horário de Brasília (UTC−3).</p>
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">Intervalo em minutos</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-foreground/80">Intervalo em minutos</label>
                   <Input
                     type="number"
                     min="1"
                     max="10080"
                     value={sendMinutes}
                     onChange={(e) => setSendMinutes(e.target.value)}
+                    className="h-9 bg-white/5 border-white/10"
                   />
                 </div>
               )}
 
-              <div className="rounded-xl bg-slate-950 p-3 border border-slate-800 text-xs flex justify-between items-center">
-                <span className="text-slate-400">Próximo envio estimado:</span>
-                <span className="font-semibold text-sky-400">
+              <div className="rounded-xl bg-white/5 p-2.5 border border-white/10 text-xs flex justify-between items-center">
+                <span className="text-muted-foreground">Próximo envio:</span>
+                <span className="font-semibold text-primary">
                   {sendEnabled ? displayDate(initialSchedule.nextAt) : 'Desativado'}
                 </span>
               </div>
 
-              <Button type="submit" variant="primary" className="w-full" disabled={savingSend}>
-                {savingSend ? 'Salvando...' : 'Salvar Agendamento de Envios'}
+              <Button type="submit" variant="primary" className="w-full h-9" disabled={savingSend}>
+                {savingSend ? 'Salvando...' : 'Salvar Envios'}
               </Button>
             </form>
           </CardContent>
         </Card>
 
         {/* Remoção Programada Form */}
-        <Card className="border-slate-800">
-          <CardHeader>
+        <Card className="border-white/10 bg-card">
+          <CardHeader className="p-4 pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Trash2 className="h-4 w-4 text-rose-400" />
                 Remoção Automática de Listas
               </CardTitle>
@@ -355,26 +356,26 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
               />
             </div>
             <CardDescription>
-              Exclui a lista enviada nos canais participantes após certo período.
+              Exclui a lista dos canais nos horários programados.
             </CardDescription>
           </CardHeader>
 
-          <CardContent>
-            <form onSubmit={handleSaveRemovalSchedule} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 block">Modo de remoção</label>
+          <CardContent className="p-4 pt-2">
+            <form onSubmit={handleSaveRemovalSchedule} className="space-y-3.5">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground/80 block">Modo de remoção</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setRemMode('fixed')}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold border transition text-left cursor-pointer ${
                       remMode === 'fixed'
-                        ? 'border-rose-500 bg-rose-500/15 text-rose-300'
-                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                        ? 'border-rose-500 bg-rose-500/20 text-rose-300'
+                        : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
                     }`}
                   >
                     <strong>Horários Fixos</strong>
-                    <span className="block text-[10px] text-slate-400 mt-0.5">Ex: 06:00, 18:00</span>
+                    <span className="block text-[10px] opacity-70 mt-0.5">Ex: 06:00, 18:00</span>
                   </button>
 
                   <button
@@ -382,19 +383,19 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
                     onClick={() => setRemMode('interval')}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold border transition text-left cursor-pointer ${
                       remMode === 'interval'
-                        ? 'border-rose-500 bg-rose-500/15 text-rose-300'
-                        : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                        ? 'border-rose-500 bg-rose-500/20 text-rose-300'
+                        : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
                     }`}
                   >
                     <strong>Intervalo</strong>
-                    <span className="block text-[10px] text-slate-400 mt-0.5">A cada X minutos</span>
+                    <span className="block text-[10px] opacity-70 mt-0.5">A cada X minutos</span>
                   </button>
                 </div>
               </div>
 
               {remMode === 'fixed' ? (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-foreground/80">
                     Horários de exclusão (separados por vírgula)
                   </label>
                   <Input
@@ -402,24 +403,26 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
                     value={remTimes}
                     onChange={(e) => setRemTimes(e.target.value)}
                     placeholder="06:00, 18:00"
+                    className="h-9 bg-white/5 border-white/10"
                   />
-                  <p className="text-[11px] text-slate-400">Horário oficial de Brasília (UTC−3).</p>
+                  <p className="text-[11px] text-muted-foreground">Horário de Brasília (UTC−3).</p>
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">Intervalo em minutos</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-foreground/80">Intervalo em minutos</label>
                   <Input
                     type="number"
                     min="1"
                     max="10080"
                     value={remMinutes}
                     onChange={(e) => setRemMinutes(e.target.value)}
+                    className="h-9 bg-white/5 border-white/10"
                   />
                 </div>
               )}
 
-              <div className="rounded-xl bg-slate-950 p-3 border border-slate-800 text-xs flex justify-between items-center">
-                <span className="text-slate-400">Próxima exclusão estimada:</span>
+              <div className="rounded-xl bg-white/5 p-2.5 border border-white/10 text-xs flex justify-between items-center">
+                <span className="text-muted-foreground">Próxima exclusão:</span>
                 <span className="font-semibold text-rose-400">
                   {remEnabled ? displayDate(initialRemoval.nextAt) : 'Desativado'}
                 </span>
@@ -428,10 +431,10 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
               <Button
                 type="submit"
                 variant="destructive"
-                className="w-full"
+                className="w-full h-9"
                 disabled={savingRem}
               >
-                {savingRem ? 'Salvando...' : 'Salvar Agendamento de Remoções'}
+                {savingRem ? 'Salvando...' : 'Salvar Remoções'}
               </Button>
             </form>
           </CardContent>
@@ -439,27 +442,27 @@ export function ScheduleTab({ data, onRefresh, isDemo }) {
       </div>
 
       {/* Cloudflare Worker / Cron Status Card */}
-      <Card className="border-slate-800">
+      <Card className="border-white/10 bg-card">
         <CardHeader className="p-4 pb-2">
-          <CardTitle className="text-sm font-semibold flex items-center justify-between">
+          <CardTitle className="text-xs font-semibold flex items-center justify-between">
             <span className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-sky-400" />
-              Status do Serviço de Automação
+              <Clock className="h-4 w-4 text-primary" />
+              Status da Automação
             </span>
             <Badge variant={isOnline ? 'success' : 'warning'}>
               {isOnline ? 'Conectado e Ativo' : 'Aguardando Cron'}
             </Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-4 pt-1 text-xs text-slate-400 space-y-2">
+        <CardContent className="p-4 pt-1 text-xs text-muted-foreground space-y-2">
           <p>
             {isOnline
-              ? 'O agendador está enviando batimentos regulares e executando as verificações no servidor.'
-              : 'O painel e o bot funcionam normalmente. Para disparar com o painel fechado, ative o Cron / Cloudflare Worker.'}
+              ? 'O agendador está executando as verificações no servidor e enviando batimentos regulares.'
+              : 'Para disparar com o painel fechado, ative o Worker de agendamento na Cloudflare.'}
           </p>
-          <div className="flex justify-between border-t border-slate-800/80 pt-2 text-[11px]">
-            <span>Última verificação registrada:</span>
-            <span className="font-mono text-slate-200">{formatDate(data?.schedulerHeartbeat)}</span>
+          <div className="flex justify-between border-t border-white/5 pt-2 text-[11px]">
+            <span>Última verificação:</span>
+            <span className="font-mono text-foreground">{formatDate(data?.schedulerHeartbeat)}</span>
           </div>
         </CardContent>
       </Card>

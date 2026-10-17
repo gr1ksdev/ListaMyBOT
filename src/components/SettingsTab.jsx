@@ -7,9 +7,8 @@ import {
   Users,
   ShieldAlert,
   FlaskConical,
-  Check,
+  CheckSquare,
   ChevronRight,
-  Info,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
@@ -17,11 +16,11 @@ import { Badge } from './ui/Badge';
 import { Input } from './ui/Input';
 import { Switch } from './ui/Switch';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/Dialog';
+import { ColorPicker } from './ui/ColorPicker';
 import { useToast } from './ui/Toast';
-import { callEndpoint, haptic } from '@/lib/telegram';
-import { COLOR_OPTIONS } from '@/lib/utils';
+import { saveSettingsSafe, haptic } from '@/lib/telegram';
 
-export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
+export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersion }) {
   const { toast } = useToast();
   const settings = data?.settings || {};
 
@@ -30,6 +29,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
   const [channelColor, setChannelColor] = React.useState(settings.channelColor || '');
   const [groupColor, setGroupColor] = React.useState(settings.groupColor || '');
 
+  const [approval, setApproval] = React.useState(settings.approval || 'manual');
   const [pin, setPin] = React.useState(Boolean(settings.pin));
   const [deletePrevious, setDeletePrevious] = React.useState(Boolean(settings.deletePrevious));
 
@@ -47,6 +47,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
       setButtonColor(data.settings.buttonColor || '');
       setChannelColor(data.settings.channelColor || '');
       setGroupColor(data.settings.groupColor || '');
+      setApproval(data.settings.approval || 'manual');
       setPin(Boolean(data.settings.pin));
       setDeletePrevious(Boolean(data.settings.deletePrevious));
       setMinMembers(data.settings.minMembers ?? 0);
@@ -55,21 +56,19 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
   }, [data]);
 
   const handleSaveColor = async (field, value) => {
+    if (field === 'buttonColor') setButtonColor(value);
+    if (field === 'channelColor') setChannelColor(value);
+    if (field === 'groupColor') setGroupColor(value);
+
     if (isDemo) {
-      toast(`Cor salva com sucesso! (Demo)`, 'info');
-      if (field === 'buttonColor') setButtonColor(value);
-      if (field === 'channelColor') setChannelColor(value);
-      if (field === 'groupColor') setGroupColor(value);
+      toast('Cor salva (Demo)', 'info');
       return;
     }
 
     try {
       haptic('selection');
       const updated = { ...settings, [field]: value };
-      await callEndpoint('saveSettings', { settings: updated, version: data?.version });
-      if (field === 'buttonColor') setButtonColor(value);
-      if (field === 'channelColor') setChannelColor(value);
-      if (field === 'groupColor') setGroupColor(value);
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Cor dos botões atualizada!', 'success');
       onRefresh?.();
     } catch (err) {
@@ -77,16 +76,33 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
     }
   };
 
+  const handleToggleApproval = async (mode) => {
+    setApproval(mode);
+    if (isDemo) {
+      toast(`Modo de aprovação: ${mode === 'automatic' ? 'Automático' : 'Manual'} (Demo)`, 'info');
+      return;
+    }
+    try {
+      haptic('selection');
+      const updated = { ...settings, approval: mode };
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
+      toast(`Modo de aprovação: ${mode === 'automatic' ? 'Automático' : 'Manual'}`, 'success');
+      onRefresh?.();
+    } catch (err) {
+      toast(err.message || 'Falha ao salvar aprovação', 'error');
+    }
+  };
+
   const handleTogglePin = async (checked) => {
     setPin(checked);
     if (isDemo) {
-      toast(`Preferência de fixar salva (Demo)`, 'info');
+      toast('Preferência de fixar salva (Demo)', 'info');
       return;
     }
     try {
       haptic('selection');
       const updated = { ...settings, pin: checked };
-      await callEndpoint('saveSettings', { settings: updated, version: data?.version });
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Preferência de fixar salva!', 'success');
       onRefresh?.();
     } catch (err) {
@@ -98,13 +114,13 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
   const handleToggleDelete = async (checked) => {
     setDeletePrevious(checked);
     if (isDemo) {
-      toast(`Preferência de apagar anterior salva (Demo)`, 'info');
+      toast('Preferência de exclusão salva (Demo)', 'info');
       return;
     }
     try {
       haptic('selection');
       const updated = { ...settings, deletePrevious: checked };
-      await callEndpoint('saveSettings', { settings: updated, version: data?.version });
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Preferência de exclusão salva!', 'success');
       onRefresh?.();
     } catch (err) {
@@ -123,7 +139,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
       setSavingMin(true);
       haptic('medium');
       const updated = { ...settings, minMembers: Number(minMembers) };
-      await callEndpoint('saveSettings', { settings: updated, version: data?.version });
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Regra de membros mínimos salva!', 'success');
       onRefresh?.();
     } catch (err) {
@@ -156,7 +172,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
       setSavingAdmins(true);
       haptic('medium');
       const updated = { ...settings, admins: ids };
-      await callEndpoint('saveSettings', { settings: updated, version: data?.version });
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Administradores autorizados atualizados!', 'success');
       setAdminModalOpen(false);
       onRefresh?.();
@@ -168,134 +184,132 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
   };
 
   return (
-    <div className="space-y-6 pb-20 animate-in fade-in duration-300">
-      {/* 1. Cores dos Botões no Telegram */}
-      <Card className="border-slate-800">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Palette className="h-4 w-4 text-sky-400" />
-            Cores dos Botões no Telegram
+    <div className="space-y-4 pb-20 animate-in fade-in duration-300">
+      {/* 1. Modo de Aprovação */}
+      <Card className="border-white/10 bg-card">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm font-semibold flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <CheckSquare className="h-4 w-4 text-primary" />
+              Modo de Aprovação de Cadastros
+            </span>
           </CardTitle>
           <CardDescription>
-            Defina o padrão de cores aplicado nos botões inline da lista enviada aos chats.
+            Como novos canais e grupos são aceitos na rede ao serem adicionados.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Cor Global */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-200">Cor Global (todos os botões)</span>
-              <span className="text-slate-400">Padrão para canais e grupos</span>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {COLOR_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => handleSaveColor('buttonColor', opt.value)}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
-                    buttonColor === opt.value
-                      ? 'border-sky-500 bg-sky-500/20 text-sky-300 font-bold'
-                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
+        <CardContent className="p-4 pt-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleToggleApproval('manual')}
+              className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                approval === 'manual'
+                  ? 'border-primary bg-primary/20 text-white font-semibold'
+                  : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
+              }`}
+            >
+              <strong className="block text-xs text-foreground">Aprovação Manual</strong>
+              <span className="text-[11px] opacity-75">Admin deve revisar e aprovar cada canal</span>
+            </button>
 
-          {/* Cor para Canais */}
-          <div className="space-y-2 border-t border-slate-800/80 pt-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-200">Cor específica para Canais</span>
-              <span className="text-slate-400">Sobrescreve a cor global</span>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                { value: '', label: 'Herda global' },
-                { value: 'primary', label: 'Azul' },
-                { value: 'success', label: 'Verde' },
-                { value: 'danger', label: 'Vermelho' },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => handleSaveColor('channelColor', opt.value)}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
-                    channelColor === opt.value
-                      ? 'border-sky-500 bg-sky-500/20 text-sky-300 font-bold'
-                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Cor para Grupos */}
-          <div className="space-y-2 border-t border-slate-800/80 pt-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-200">Cor específica para Grupos</span>
-              <span className="text-slate-400">Sobrescreve a cor global</span>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                { value: '', label: 'Herda global' },
-                { value: 'primary', label: 'Azul' },
-                { value: 'success', label: 'Verde' },
-                { value: 'danger', label: 'Vermelho' },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => handleSaveColor('groupColor', opt.value)}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
-                    groupColor === opt.value
-                      ? 'border-sky-500 bg-sky-500/20 text-sky-300 font-bold'
-                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => handleToggleApproval('automatic')}
+              className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                approval === 'automatic'
+                  ? 'border-primary bg-primary/20 text-white font-semibold'
+                  : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
+              }`}
+            >
+              <strong className="block text-xs text-foreground">Aprovação Automática</strong>
+              <span className="text-[11px] opacity-75">Canais válidos entram na lista direto</span>
+            </button>
           </div>
         </CardContent>
       </Card>
 
-      {/* 2. Opções de Publicação (Switches) */}
-      <Card className="border-slate-800">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Pin className="h-4 w-4 text-sky-400" />
-            Preferências de Publicação
+      {/* 2. Cores dos Botões no Telegram (Organizado com ColorPicker) */}
+      <Card className="border-white/10 bg-card">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Palette className="h-4 w-4 text-primary" />
+            Cores dos Botões no Telegram
           </CardTitle>
           <CardDescription>
-            Comportamentos executados durante cada rodada de disparo.
+            Personalize as cores dos botões na lista enviada aos canais e grupos.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between rounded-xl bg-slate-950 p-3.5 border border-slate-800">
+        <CardContent className="p-4 pt-2 space-y-3.5">
+          {/* Cor Global */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="text-xs font-semibold text-foreground block">Cor Global</span>
+              <span className="text-[11px] text-muted-foreground">Padrão para todos os botões</span>
+            </div>
+            <ColorPicker
+              value={buttonColor}
+              onChange={(val) => handleSaveColor('buttonColor', val)}
+              inheritLabel="Padrão"
+            />
+          </div>
+
+          {/* Cor para Canais */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/5 pt-3">
+            <div>
+              <span className="text-xs font-semibold text-foreground block">Cor para Canais</span>
+              <span className="text-[11px] text-muted-foreground">Substitui apenas nos canais</span>
+            </div>
+            <ColorPicker
+              value={channelColor}
+              onChange={(val) => handleSaveColor('channelColor', val)}
+              inheritLabel="Herda Global"
+            />
+          </div>
+
+          {/* Cor para Grupos */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/5 pt-3">
+            <div>
+              <span className="text-xs font-semibold text-foreground block">Cor para Grupos</span>
+              <span className="text-[11px] text-muted-foreground">Substitui apenas nos grupos</span>
+            </div>
+            <ColorPicker
+              value={groupColor}
+              onChange={(val) => handleSaveColor('groupColor', val)}
+              inheritLabel="Herda Global"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 3. Opções de Publicação (Switches) */}
+      <Card className="border-white/10 bg-card">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Pin className="h-4 w-4 text-primary" />
+            Preferências de Publicação
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 pt-2 space-y-3">
+          <div className="flex items-center justify-between rounded-xl bg-white/5 p-3 border border-white/10">
             <div className="space-y-0.5">
-              <span className="text-xs font-semibold text-slate-200 block">
-                Fixar nova lista automaticamente (Pin)
+              <span className="text-xs font-semibold text-foreground block">
+                Fixar nova lista (Pin)
               </span>
-              <span className="text-[11px] text-slate-400">
-                Fixa a mensagem da lista no topo dos canais e supergrupos participantes.
+              <span className="text-[11px] text-muted-foreground">
+                Fixa a mensagem no topo dos canais e supergrupos.
               </span>
             </div>
             <Switch checked={pin} onChange={handleTogglePin} />
           </div>
 
-          <div className="flex items-center justify-between rounded-xl bg-slate-950 p-3.5 border border-slate-800">
+          <div className="flex items-center justify-between rounded-xl bg-white/5 p-3 border border-white/10">
             <div className="space-y-0.5">
-              <span className="text-xs font-semibold text-slate-200 block">
-                Apagar mensagem da lista anterior
+              <span className="text-xs font-semibold text-foreground block">
+                Apagar lista anterior
               </span>
-              <span className="text-[11px] text-slate-400">
-                Remove a última mensagem antes de postar a nova rodada.
+              <span className="text-[11px] text-muted-foreground">
+                Remove a última mensagem antes de enviar a nova rodada.
               </span>
             </div>
             <Switch checked={deletePrevious} onChange={handleToggleDelete} />
@@ -303,19 +317,19 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
         </CardContent>
       </Card>
 
-      {/* 3. Mínimo de Membros */}
-      <Card className="border-slate-800">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Users className="h-4 w-4 text-sky-400" />
-            Filtro de Membros Mínimos
+      {/* 4. Mínimo de Membros */}
+      <Card className="border-white/10 bg-card">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Users className="h-4 w-4 text-primary" />
+            Mínimo de Membros Exigido
           </CardTitle>
           <CardDescription>
-            Quantidade mínima de membros para aceitar o canal/grupo na rede.
+            Quantidade mínima de membros para aceitar um canal ou grupo na rede.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSaveMinMembers} className="space-y-3">
+        <CardContent className="p-4 pt-2">
+          <form onSubmit={handleSaveMinMembers} className="space-y-2">
             <div className="flex gap-2">
               <Input
                 type="number"
@@ -324,49 +338,47 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
                 value={minMembers}
                 onChange={(e) => setMinMembers(e.target.value)}
                 placeholder="Ex: 100"
-                className="max-w-[160px]"
+                className="max-w-[150px] bg-white/5 border-white/10"
               />
               <Button type="submit" variant="primary" disabled={savingMin}>
                 {savingMin ? 'Salvando...' : 'Salvar Mínimo'}
               </Button>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Informe 0 para desativar a exigência de membros.
+            <p className="text-[11px] text-muted-foreground">
+              Use 0 para desativar a exigência.
             </p>
           </form>
         </CardContent>
       </Card>
 
-      {/* 4. Administradores & Modo de Demonstração */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Administradores */}
+      {/* 5. Administradores & Modo de Demonstração */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Card
           onClick={() => setAdminModalOpen(true)}
-          className="cursor-pointer border-slate-800 hover:border-sky-500/40 transition hover:bg-slate-900/90"
+          className="cursor-pointer border-white/10 bg-card hover:border-white/20 transition"
         >
           <CardHeader className="p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-sky-400">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-primary">
                   <ShieldAlert className="h-4 w-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-semibold text-slate-100">Administradores</h4>
-                  <p className="text-[11px] text-slate-400">
+                  <h4 className="text-xs font-semibold text-foreground">Administradores</h4>
+                  <p className="text-[11px] text-muted-foreground">
                     {(settings.admins || []).length} autorizado(s)
                   </p>
                 </div>
               </div>
-              <ChevronRight className="h-4 w-4 text-slate-400" />
+              <ChevronRight className="h-4 w-4 opacity-50" />
             </div>
           </CardHeader>
         </Card>
 
-        {/* Modo Demo */}
         <Card
           onClick={onToggleDemo}
-          className={`cursor-pointer border-slate-800 transition ${
-            isDemo ? 'border-amber-500/50 bg-amber-950/20' : 'hover:border-slate-700'
+          className={`cursor-pointer border-white/10 bg-card transition ${
+            isDemo ? 'border-amber-500/50 bg-amber-500/10' : 'hover:border-white/20'
           }`}
         >
           <CardHeader className="p-4">
@@ -374,17 +386,17 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
               <div className="flex items-center gap-2.5">
                 <div
                   className={`flex h-9 w-9 items-center justify-center rounded-xl ${
-                    isDemo ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'
+                    isDemo ? 'bg-amber-500/20 text-amber-400' : 'bg-white/10 text-muted-foreground'
                   }`}
                 >
                   <FlaskConical className="h-4 w-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-semibold text-slate-100">
+                  <h4 className="text-xs font-semibold text-foreground">
                     {isDemo ? 'Sair do Modo Demo' : 'Modo de Testes (Demo)'}
                   </h4>
-                  <p className="text-[11px] text-slate-400">
-                    {isDemo ? 'Ativo com 20 canais fictícios' : 'Simule 20 canais sem alterar banco'}
+                  <p className="text-[11px] text-muted-foreground">
+                    {isDemo ? '20 canais simulados' : 'Simule sem alterar banco'}
                   </p>
                 </div>
               </div>
@@ -399,23 +411,23 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo }) {
         <DialogHeader>
           <DialogTitle>Gerenciar Administradores</DialogTitle>
           <DialogDescription>
-            Lista de Telegram User IDs autorizados a acessar este painel e moderar a lista.
+            Lista de Telegram User IDs autorizados a acessar este painel.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSaveAdmins} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-300">
+            <label className="text-xs font-semibold text-foreground/80">
               IDs de Usuários (um por linha)
             </label>
             <textarea
               rows={6}
               value={adminIdsText}
               onChange={(e) => setAdminIdsText(e.target.value)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 font-mono text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="w-full rounded-xl border border-white/10 bg-background p-3 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               placeholder="7595607953&#10;123456789"
             />
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-muted-foreground">
               O administrador proprietário do bot é protegido e permanece sempre autorizado.
             </p>
           </div>

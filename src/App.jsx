@@ -8,8 +8,8 @@ import { OrganizeTab } from './components/OrganizeTab';
 import { ScheduleTab } from './components/ScheduleTab';
 import { SettingsTab } from './components/SettingsTab';
 import { Button } from './components/ui/Button';
-import { callEndpoint, initTelegramApp, haptic } from './lib/telegram';
-import { RefreshCw, AlertCircle, Bot } from 'lucide-react';
+import { callEndpoint, initTelegramApp, openTelegramLink, haptic } from './lib/telegram';
+import { RefreshCw, Bot } from 'lucide-react';
 
 function DashboardContent() {
   const { toast } = useToast();
@@ -30,12 +30,19 @@ function DashboardContent() {
       realDataBackup.current = res;
       if (showToast) toast('Dados atualizados do servidor.', 'success');
     } catch (err) {
-      console.error('Failed to load dashboard data:', err);
-      setError(err.message || 'Falha ao carregar dados do painel');
+      console.warn('Failed to load dashboard data:', err);
+      setError(err.message || 'Falha ao carregar dados do painel.');
     } finally {
       setLoading(false);
     }
   }, [toast]);
+
+  const handleSyncVersion = React.useCallback((newVersion, freshData) => {
+    setData((prev) => {
+      if (freshData) return { ...freshData };
+      return prev ? { ...prev, version: newVersion } : prev;
+    });
+  }, []);
 
   React.useEffect(() => {
     initTelegramApp();
@@ -46,7 +53,6 @@ function DashboardContent() {
   const handleToggleDemo = () => {
     haptic('medium');
     if (!isDemo) {
-      // Enter demo
       const names = [
         'Clube dos Livros', 'Papo Livre', 'Cinema em Casa', 'Música Todo Dia',
         'Notícias Agora', 'Curso de Inglês', 'Humor BR', 'Investidores Iniciantes',
@@ -58,7 +64,8 @@ function DashboardContent() {
       const members = [25, 50, 99, 100, 101, 150, 200, 250, 300, 400, 500, 600, 750, 900, 1000, 1500, 2000, 3000, 5000, 10000];
 
       const demoData = {
-        ...data,
+        ...(data || {}),
+        id: 7595607953,
         demo: true,
         version: (data?.version || 1) + 1,
         schedulerHeartbeat: Date.now(),
@@ -93,11 +100,11 @@ function DashboardContent() {
         ],
       };
 
+      setError(null);
       setData(demoData);
       setIsDemo(true);
       toast('Modo Demonstração ativado (20 canais simulados)', 'info');
     } else {
-      // Exit demo
       setIsDemo(false);
       if (realDataBackup.current) {
         setData(realDataBackup.current);
@@ -115,25 +122,60 @@ function DashboardContent() {
     }
   };
 
-  // If initial load failed with error
+  // Loading state
+  if (loading && !data) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center bg-background text-foreground">
+        <div className="flex flex-col items-center space-y-4 animate-in fade-in duration-200">
+          <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white shadow-lg animate-pulse">
+            <Bot className="h-7 w-7" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold text-foreground">Conectando ao Telegram…</h2>
+            <p className="text-xs text-muted-foreground">Carregando painel administrativo</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state (outside Telegram or auth failed)
   if (error && !data) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center">
-        <div className="rounded-2xl border border-rose-500/30 bg-rose-950/20 p-8 max-w-sm w-full space-y-4">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/20 text-rose-400">
-            <AlertCircle className="h-7 w-7" />
+      <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center bg-background text-foreground">
+        <div className="rounded-3xl border border-white/10 bg-card p-6 max-w-sm w-full space-y-4 shadow-xl animate-in zoom-in-95 duration-200">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/20 text-primary">
+            <Bot className="h-6 w-6" />
           </div>
-          <h2 className="text-lg font-bold text-slate-100">Erro ao carregar</h2>
-          <p className="text-xs text-slate-400">{error}</p>
-          <Button
-            variant="primary"
-            onClick={() => loadData()}
-            className="w-full"
-            disabled={loading}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Tentar Novamente
-          </Button>
+          <div className="space-y-1">
+            <h2 className="text-base font-bold text-foreground">ListaMyBOT</h2>
+            <p className="text-xs text-muted-foreground">{error}</p>
+          </div>
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              variant="primary"
+              onClick={() => loadData()}
+              className="w-full text-xs font-semibold h-9"
+              disabled={loading}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+              Tentar Novamente
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => openTelegramLink('https://t.me/ListaMyBOT')}
+              className="w-full text-xs border-white/10 h-9"
+            >
+              Abrir bot no Telegram
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={handleToggleDemo}
+              className="w-full text-xs text-amber-400 hover:bg-amber-500/10 h-9"
+            >
+              Explorar modo de testes (Demo)
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -142,7 +184,7 @@ function DashboardContent() {
   const pendingCount = (data?.chats || []).filter((c) => c.status === 'pending').length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-sky-500 selection:text-slate-950 flex flex-col">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Header
         data={data}
         loading={loading}
@@ -151,7 +193,7 @@ function DashboardContent() {
         onToggleDemo={handleToggleDemo}
       />
 
-      <main className="flex-1 mx-auto w-full max-w-5xl px-4 pt-5">
+      <main className="flex-1 mx-auto w-full max-w-4xl px-3.5 pt-4">
         {activeTab === 'overview' && (
           <OverviewTab
             data={data}
@@ -175,6 +217,7 @@ function DashboardContent() {
             data={data}
             onRefresh={() => loadData()}
             isDemo={isDemo}
+            onSyncVersion={handleSyncVersion}
           />
         )}
 
@@ -183,6 +226,7 @@ function DashboardContent() {
             data={data}
             onRefresh={() => loadData()}
             isDemo={isDemo}
+            onSyncVersion={handleSyncVersion}
           />
         )}
 
@@ -192,6 +236,7 @@ function DashboardContent() {
             onRefresh={() => loadData()}
             isDemo={isDemo}
             onToggleDemo={handleToggleDemo}
+            onSyncVersion={handleSyncVersion}
           />
         )}
       </main>
