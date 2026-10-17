@@ -1,0 +1,1 @@
+{"name":"listamybot-scheduler","private":true,"type":"module","scripts":{"deploy":"wrangler deploy","login":"wrangler login","secret":"wrangler secret put TGCLOUD_TOKEN"},"devDependencies":{"wrangler":"^4.0.0"}}

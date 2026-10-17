@@ -1,0 +1,19 @@
+# tgcloud local machine state and bot credentials (CRITICAL: NEVER COMMIT)
+.tgcloud/
+
+# Dependencies
+node_modules/
+scheduler/node_modules/
+
+# Cloudflare Wrangler local state & secrets
+scheduler/.wrangler/
+scheduler/.dev.vars
+
+# Environment secrets
+.env
+.env.*
+
+# Logs and OS metadata
+*.log
+.DS_Store
+Thumbs.db

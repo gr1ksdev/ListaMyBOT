@@ -1,0 +1,27 @@
+// Optional real-browser check: NODE_PATH pointing to Playwright installation.
+const {chromium}=require('playwright');const assert=require('node:assert/strict');
+(async()=>{
+ const {DEFAULTS,CATEGORIES}=await import('../tgcloud/lib/domain.js');
+ const options={headless:true,args:['--no-sandbox']};
+ if(process.env.CHROMIUM_MODULE){const {default:c}=await import(process.env.CHROMIUM_MODULE);options.executablePath=process.env.CHROMIUM_PATH||await c.executablePath();options.args=c.args;}
+ const http=require('node:http'),fs=require('node:fs'),path=require('node:path');const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;const name=pathname==='/'?'index.html':pathname.slice(1);const file=path.join(__dirname,'../dist',name);try{res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.woff2')?'font/woff2':name.endsWith('.svg')?'image/svg+xml':name.endsWith('.ttf')?'font/ttf':'text/html');res.end(fs.readFileSync(file));}catch{res.statusCode=404;res.end();}});await new Promise(r=>server.listen(8765,'127.0.0.1',r));server.unref();const browser=await chromium.launch(options);const page=await browser.newPage({viewport:{width:390,height:844}});if(process.env.CPU_RATE){const cdp=await page.context().newCDPSession(page);await cdp.send('Emulation.setCPUThrottlingRate',{rate:Number(process.env.CPU_RATE)});}const assetRequests=[];page.on('request',r=>assetRequests.push(r.url()));const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+ let settings=structuredClone(DEFAULTS),version=1;
+ const fixture={id:7595607953,chats:[{id:-123,title:'Clube dos Filmes',display:'',url:'https://t.me/clubefilmes',category:7,status:'approved',type:'channel',position:0},{id:-124,title:'Notícias Agora',display:'',url:'https://t.me/noticiasagora',category:11,status:'approved',type:'channel',position:1}],rounds:[],deliveries:[],categories:CATEGORIES,schedulerHeartbeat:0};
+ await page.route('https://telegram.org/js/telegram-web-app.js',r=>r.fulfill({contentType:'text/javascript',body:`window.Telegram={WebApp:{initData:'LOCAL_UI_TEST',colorScheme:'light',onEvent(){},ready(){},expand(){},Serverless:{call(name,input,cb){window.testCall(name,input).then(r=>cb(null,r)).catch(e=>cb({message:e.message}));}}}};`}));
+ await page.exposeFunction('testCall',async(name,input)=>{if(name==='dashboard')return {...fixture,settings,version};if(name==='saveSettings'){settings=input.settings;version++;return {ok:true};}throw Error('Unexpected '+name);});
+ await page.goto('http://127.0.0.1:8765');await page.locator('#app').waitFor({state:'visible',timeout:5000}).catch(async e=>{console.error(errors,await page.locator('#gate-text').textContent());throw e;});await page.click('[data-tab="list"]');await page.click('#example-pattern');
+ await page.screenshot({path:'/tmp/listamybot-pattern.png',fullPage:true});
+ // Genuine pointer drag, not invoking application internals.
+ const source=await page.locator('[data-drop-row="1"][data-token] .drag-grip').first().boundingBox();const dest=await page.locator('[data-add-row="0"]').first().boundingBox();
+ await page.mouse.move(source.x+source.width/2,source.y+source.height/2);await page.mouse.down();await page.mouse.move(dest.x+dest.width/2,dest.y+dest.height/2,{steps:12});await page.mouse.up();
+ assert.equal(await page.locator('.pattern-summary strong').textContent(),'2 → 1 → 1');
+ await page.click('#add-buttons');await page.screenshot({path:'/tmp/listamybot-picker.png',fullPage:true});await page.click('#close-picker');
+ await page.click('#example-pattern');await page.click('#organize-panel button[type="submit"]');await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Alterações salvas.');assert.deepEqual(settings.rowPattern,[1,2,1]);
+ await page.click('[data-view="preview"]');await page.screenshot({path:'/tmp/listamybot-preview.png',fullPage:true});
+ await page.click('#back-organize');
+ for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:844});for(const tab of ['home','chats','list','schedule','settings']){await page.click(`[data-tab="${tab}"]`);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${tab}: overflow at ${width}`);}}
+ // Verify dense patterns at mobile width and Telegram dark theme.
+ await page.setViewportSize({width:320,height:844});await page.click('[data-tab="list"]');await page.click('#more-column');await page.click('#more-column');await page.click('#add-buttons');await page.click('[data-source="fake"]');await page.fill('#fake-count','96');await page.click('#confirm-pick');assert.equal(await page.locator('.pattern-line').count(),20);assert.equal(await page.locator('[data-token]').count(),100);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await page.evaluate(()=>{window.Telegram.WebApp.colorScheme='dark';document.documentElement.dataset.theme='dark';});await page.screenshot({path:'/tmp/listamybot-dense-dark.png',fullPage:true});
+ assert.deepEqual(errors,[]);assert.equal(assetRequests.some(u=>/\/(app|layout)\.js|\/(style|fonts)\.css/.test(u)),false,'boot must not fetch sequential app/style dependencies');await browser.close();server.close();console.log('Browser passed: real pointer drag, pattern save, picker, 100 buttons, 5 tabs, 320/390/768/1280px without overflow.');
+})().catch(e=>{console.error(e);process.exit(1)});
