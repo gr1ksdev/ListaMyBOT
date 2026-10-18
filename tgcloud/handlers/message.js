@@ -1,5 +1,5 @@
 import { api, db } from 'sdk';
-import { APP_URL, validLink } from '../lib/domain.js';
+import { APP_URL, validLink, OWNER, validateSettings } from '../lib/domain.js';
 import { getChat, isAdmin, state, putState, isBanned, config } from '../lib/store.js';
 import { register, menu, chatAdmin } from '../lib/registration.js';
 import { screen, privateScreen, escHtml } from '../lib/navigation.js';
@@ -101,6 +101,143 @@ async function handleMessage(m){
          `• <b>Tópico de Logs:</b> <code>${c.settings.promoLogTopic || 'Nenhum (chat principal)'}</code>\n` +
          `• <b>Canal Vinculado:</b> <code>${c.settings.promoChannel || 'Não vinculado'}</code>\n\n` +
          `<i>Use /setlogs no grupo de logs e /setcanal no canal de publicação.</i>`,
+   parse_mode: 'HTML'
+  });
+  return;
+ }
+ if (cmd === '/setadmin' || cmd === '/addadmin') {
+  if (!await isAdmin(user)) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: '🚫 <b>Acesso negado:</b> apenas o proprietário e administradores podem cadastrar novos administradores.',
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  let targetId = null;
+  if (args[0]) {
+   const cleanArg = args[0].replace(/^@/, '');
+   if (/^\d+$/.test(cleanArg)) {
+    targetId = Number(cleanArg);
+   }
+  } else if (m.reply_to_message?.from?.id) {
+   targetId = m.reply_to_message.from.id;
+  }
+  if (!targetId || !Number.isSafeInteger(targetId) || targetId <= 0) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `ℹ️ <b>Uso do comando /setadmin:</b>\n\n` +
+          `• Envie: <code>/setadmin &lt;ID_DO_USUARIO&gt;</code>\n` +
+          `• Ou responda à mensagem de alguém com: <code>/setadmin</code>\n\n` +
+          `<i>Exemplo: <code>/setadmin 123456789</code></i>`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  if (targetId === OWNER) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `👑 O ID <code>${targetId}</code> já é o <b>Proprietário (Owner) permanente</b> do bot.`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  const c = await config();
+  const currentAdmins = c.settings.admins || [];
+  if (currentAdmins.includes(targetId)) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `ℹ️ O usuário com ID <code>${targetId}</code> já é um <b>administrador</b> cadastrado.`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  if (currentAdmins.length >= 20) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `❌ Limite de 20 administradores atingido. Remova algum administrador antes de adicionar novos.`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  const newAdmins = [...new Set([OWNER, ...currentAdmins, targetId])];
+  const updated = validateSettings({ ...c.settings, admins: newAdmins });
+  if (c.version === 0) {
+   await db.run('INSERT INTO list_settings(id, value, version) VALUES(1, :v, 1) ON CONFLICT(id) DO UPDATE SET value=excluded.value', { ':v': JSON.stringify(updated) });
+  } else {
+   await db.run('UPDATE list_settings SET value=:v, version=version+1 WHERE id=1', { ':v': JSON.stringify(updated) });
+  }
+  await api.sendMessage({
+   chat_id: m.chat.id,
+   text: `✅ <b>Novo administrador configurado com sucesso!</b>\n\n` +
+         `🆔 <b>ID:</b> <code>${targetId}</code>\n` +
+         `🛡️ O usuário agora tem acesso de administrador ao bot e ao painel Mini App.`,
+   parse_mode: 'HTML'
+  });
+  return;
+ }
+ if (cmd === '/deladmin' || cmd === '/removeadmin') {
+  if (!await isAdmin(user)) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: '🚫 <b>Acesso negado:</b> apenas o proprietário e administradores podem remover administradores.',
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  let targetId = null;
+  if (args[0] && /^\d+$/.test(args[0])) {
+   targetId = Number(args[0]);
+  } else if (m.reply_to_message?.from?.id) {
+   targetId = m.reply_to_message.from.id;
+  }
+  if (!targetId || !Number.isSafeInteger(targetId) || targetId <= 0) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `ℹ️ <b>Uso do comando /deladmin:</b>\n\nEnvie <code>/deladmin &lt;ID_DO_USUARIO&gt;</code> para remover um administrador.`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  if (targetId === OWNER) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `❌ <b>Ação bloqueada:</b> O proprietário (Owner) permanente do bot não pode ser removido.`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  const c = await config();
+  const currentAdmins = c.settings.admins || [];
+  if (!currentAdmins.includes(targetId)) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `ℹ️ O ID <code>${targetId}</code> não está na lista de administradores.`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  const newAdmins = currentAdmins.filter(id => id !== targetId);
+  const updated = validateSettings({ ...c.settings, admins: newAdmins });
+  await db.run('UPDATE list_settings SET value=:v, version=version+1 WHERE id=1', { ':v': JSON.stringify(updated) });
+  await api.sendMessage({
+   chat_id: m.chat.id,
+   text: `🗑️ <b>Administrador removido com sucesso!</b>\n\n🆔 ID: <code>${targetId}</code> não possui mais acesso administrativo.`,
+   parse_mode: 'HTML'
+  });
+  return;
+ }
+ if (cmd === '/admins') {
+  if (!await isAdmin(user)) return;
+  const c = await config();
+  const currentAdmins = (c.settings.admins || []).filter(id => id !== OWNER);
+  await api.sendMessage({
+   chat_id: m.chat.id,
+   text: `🛡️ <b>Administradores do Bot:</b>\n\n` +
+         `👑 <b>Proprietário (Owner):</b> <code>${OWNER}</code>\n\n` +
+         `<b>Administradores Adicionais (${currentAdmins.length}):</b>\n` +
+         (currentAdmins.length ? currentAdmins.map(id => `• <code>${id}</code>`).join('\n') : '<i>Nenhum administrador adicional cadastrado.</i>') +
+         `\n\n<i>Para adicionar: <code>/setadmin &lt;ID&gt;</code></i>\n<i>Para remover: <code>/deladmin &lt;ID&gt;</code></i>`,
    parse_mode: 'HTML'
   });
   return;

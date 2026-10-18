@@ -208,3 +208,63 @@ test('banir e desbanir usuário: suspende cadastros e bloqueia mensagens privada
  assert.match(okMsg.text,/👋 Oiê/);
 });
 
+test('comandos /setadmin, /deladmin e /admins gerenciam administradores com sucesso',async()=>{
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(DEFAULTS));
+
+ const ownerMsg = text => ({ text, chat: { id: 7595607953, type: 'private' }, from: { id: 7595607953 } });
+ const nonAdminMsg = text => ({ text, chat: { id: 42, type: 'private' }, from: { id: 42 } });
+
+ // Não-admin tenta /setadmin
+ calls = [];
+ await message(nonAdminMsg('/setadmin 123456789'));
+ const denied = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(denied.text, /Acesso negado/);
+
+ // Owner executa /setadmin sem ID
+ calls = [];
+ await message(ownerMsg('/setadmin'));
+ const usage = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(usage.text, /Uso do comando \/setadmin/);
+
+ // Owner tenta /setadmin com o próprio ID de owner
+ calls = [];
+ await message(ownerMsg('/setadmin 7595607953'));
+ const alreadyOwner = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(alreadyOwner.text, /Proprietário \(Owner\) permanente/);
+
+ // Owner adiciona novo admin 123456789
+ calls = [];
+ await message(ownerMsg('/setadmin 123456789'));
+ const successAdd = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(successAdd.text, /Novo administrador configurado com sucesso/);
+ assert.match(successAdd.text, /123456789/);
+
+ // Verifica no banco se 123456789 foi adicionado
+ const row = sql.prepare('SELECT value FROM list_settings WHERE id=1').get();
+ const settings = JSON.parse(row.value);
+ assert.ok(settings.admins.includes(123456789));
+
+ // Lista admins com /admins
+ calls = [];
+ await message(ownerMsg('/admins'));
+ const adminsList = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(adminsList.text, /7595607953/);
+ assert.match(adminsList.text, /123456789/);
+
+ // Tentar remover owner com /deladmin é bloqueado
+ calls = [];
+ await message(ownerMsg('/deladmin 7595607953'));
+ const blockedDel = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(blockedDel.text, /proprietário \(owner\) permanente/i);
+
+ // Remover admin 123456789
+ calls = [];
+ await message(ownerMsg('/deladmin 123456789'));
+ const successDel = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(successDel.text, /Administrador removido com sucesso/);
+
+ const rowAfter = sql.prepare('SELECT value FROM list_settings WHERE id=1').get();
+ const settingsAfter = JSON.parse(rowAfter.value);
+ assert.equal(settingsAfter.admins.includes(123456789), false);
+});
+

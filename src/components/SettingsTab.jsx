@@ -6,6 +6,10 @@ import {
   Trash2,
   Users,
   ShieldAlert,
+  Shield,
+  Crown,
+  UserPlus,
+  Plus,
   FlaskConical,
   CheckSquare,
   ChevronRight,
@@ -19,6 +23,8 @@ import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } fr
 import { ColorPicker } from './ui/ColorPicker';
 import { useToast } from './ui/Toast';
 import { saveSettingsSafe, haptic } from '@/lib/telegram';
+
+const BOT_OWNER_ID = 7595607953;
 
 export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersion }) {
   const { toast } = useToast();
@@ -36,9 +42,12 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
   const [minMembers, setMinMembers] = React.useState(settings.minMembers ?? 0);
   const [savingMin, setSavingMin] = React.useState(false);
 
-  // Admin modal state
+  // Admin management state
   const [adminModalOpen, setAdminModalOpen] = React.useState(false);
-  const [adminIdsText, setAdminIdsText] = React.useState((settings.admins || []).join('\n'));
+  const [adminList, setAdminList] = React.useState(
+    (settings.admins || []).filter((id) => id !== BOT_OWNER_ID)
+  );
+  const [newAdminInput, setNewAdminInput] = React.useState('');
   const [savingAdmins, setSavingAdmins] = React.useState(false);
 
   // Sync state when data changes
@@ -51,7 +60,9 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       setPin(Boolean(data.settings.pin));
       setDeletePrevious(Boolean(data.settings.deletePrevious));
       setMinMembers(data.settings.minMembers ?? 0);
-      setAdminIdsText((data.settings.admins || []).join('\n'));
+      setAdminList(
+        (data.settings.admins || []).filter((id) => id !== BOT_OWNER_ID)
+      );
     }
   }, [data]);
 
@@ -149,38 +160,71 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
     }
   };
 
-  const handleSaveAdmins = async (e) => {
-    e?.preventDefault();
-    const ids = adminIdsText
-      .split(/[\s,]+/)
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map(Number);
-
-    if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
-      toast('Informe IDs numéricos válidos.', 'error');
-      return;
-    }
-
+  const saveAdminsToBackend = async (nextList) => {
     if (isDemo) {
-      toast('Administradores salvos! (Demo)', 'info');
-      setAdminModalOpen(false);
-      return;
+      toast('Administradores atualizados! (Demo)', 'info');
+      return true;
     }
-
     try {
       setSavingAdmins(true);
       haptic('medium');
-      const updated = { ...settings, admins: ids };
+      const allAdmins = [BOT_OWNER_ID, ...nextList];
+      const updated = { ...settings, admins: allAdmins };
       await saveSettingsSafe(updated, data?.version, onSyncVersion);
-      toast('Administradores autorizados atualizados!', 'success');
-      setAdminModalOpen(false);
+      toast('Administradores atualizados com sucesso!', 'success');
       onRefresh?.();
+      return true;
     } catch (err) {
       toast(err.message || 'Falha ao salvar administradores', 'error');
+      setAdminList(
+        (data?.settings?.admins || []).filter((id) => id !== BOT_OWNER_ID)
+      );
+      return false;
     } finally {
       setSavingAdmins(false);
     }
+  };
+
+  const handleAddAdmin = async (e) => {
+    e?.preventDefault();
+    const clean = newAdminInput.trim().replace(/^@/, '');
+    const id = Number(clean);
+
+    if (!clean || !Number.isSafeInteger(id) || id <= 0) {
+      toast('Informe um ID de usuário numérico válido.', 'error');
+      return;
+    }
+
+    if (id === BOT_OWNER_ID) {
+      toast('Este ID é o proprietário (Owner) permanente do bot!', 'warning');
+      setNewAdminInput('');
+      return;
+    }
+
+    if (adminList.includes(id)) {
+      toast('Este ID já está cadastrado como administrador.', 'warning');
+      return;
+    }
+
+    if (adminList.length >= 19) {
+      toast('Limite máximo de 20 administradores atingido.', 'error');
+      return;
+    }
+
+    const nextList = [...adminList, id];
+    setAdminList(nextList);
+    setNewAdminInput('');
+    await saveAdminsToBackend(nextList);
+  };
+
+  const handleRemoveAdmin = async (idToRemove) => {
+    if (idToRemove === BOT_OWNER_ID) {
+      toast('O proprietário (Owner) não pode ser removido!', 'error');
+      return;
+    }
+    const nextList = adminList.filter((id) => id !== idToRemove);
+    setAdminList(nextList);
+    await saveAdminsToBackend(nextList);
   };
 
   return (
@@ -360,13 +404,13 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
           <CardHeader className="p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-primary">
-                  <ShieldAlert className="h-4 w-4" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/15 text-amber-400">
+                  <Crown className="h-4 w-4" />
                 </div>
                 <div>
                   <h4 className="text-xs font-semibold text-foreground">Administradores</h4>
                   <p className="text-[11px] text-muted-foreground">
-                    {(settings.admins || []).length} autorizado(s)
+                    👑 1 Dono {adminList.length > 0 ? `+ ${adminList.length} admin(s)` : '(Mestre)'}
                   </p>
                 </div>
               </div>
@@ -406,46 +450,153 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
         </Card>
       </div>
 
-      {/* Modal: Administradores */}
+      {/* Modal: Administradores em Cards */}
       <Dialog open={adminModalOpen} onOpenChange={setAdminModalOpen}>
         <DialogHeader>
-          <DialogTitle>Gerenciar Administradores</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Crown className="h-4 w-4 text-amber-400" />
+            Gerenciar Administradores
+          </DialogTitle>
           <DialogDescription>
-            Lista de Telegram User IDs autorizados a acessar este painel.
+            Controle de acesso ao painel e permissões de gerenciamento do bot.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSaveAdmins} className="space-y-4">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          {/* Card: Owner Permanente */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground/80">
-              IDs de Usuários (um por linha)
-            </label>
-            <textarea
-              rows={6}
-              value={adminIdsText}
-              onChange={(e) => setAdminIdsText(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-background p-3 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="7595607953&#10;123456789"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              O administrador proprietário do bot é protegido e permanece sempre autorizado.
-            </p>
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block">
+              Proprietário do Bot
+            </span>
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+                  <Crown className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-foreground">Gabriel (Owner)</span>
+                    <Badge variant="warning" className="text-[10px] py-0 px-1.5 font-medium">
+                      👑 Dono
+                    </Badge>
+                  </div>
+                  <p className="font-mono text-xs text-amber-300 font-semibold mt-0.5">
+                    ID: {BOT_OWNER_ID}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Acesso mestre permanente ao bot e ao painel. Não pode ser removido.
+                  </p>
+                </div>
+              </div>
+              <Badge variant="outline" className="text-[11px] text-amber-400/80 border-amber-500/30 shrink-0">
+                Fixo
+              </Badge>
+            </div>
           </div>
 
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setAdminModalOpen(false)}
-              disabled={savingAdmins}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" variant="primary" disabled={savingAdmins}>
-              {savingAdmins ? 'Salvando...' : 'Salvar Administradores'}
-            </Button>
-          </DialogFooter>
-        </form>
+          {/* Cards: Administradores Adicionais */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Administradores Adicionais ({adminList.length})
+              </span>
+              <span className="text-[10px] text-muted-foreground">
+                Comando /setadmin no bot
+              </span>
+            </div>
+
+            {adminList.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-white/10 p-5 text-center bg-white/[0.02]">
+                <Shield className="h-6 w-6 text-muted-foreground/40 mx-auto mb-1.5" />
+                <p className="text-xs font-medium text-foreground/80">
+                  Nenhum administrador adicional
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Adicione novos administradores pelo campo abaixo ou com o comando <code className="text-primary font-mono">/setadmin &lt;id&gt;</code> no Telegram.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {adminList.map((adminId) => (
+                  <div
+                    key={adminId}
+                    className="rounded-xl border border-white/10 bg-white/5 p-3 flex items-center justify-between hover:border-white/20 transition group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary shrink-0">
+                        <Shield className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-foreground">
+                            {adminId}
+                          </span>
+                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 text-primary border-primary/30">
+                            Admin
+                          </Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          Acesso completo a aprovações, configurações e moderação
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveAdmin(adminId)}
+                      disabled={savingAdmins}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8 px-2.5 flex items-center gap-1 shrink-0 transition"
+                      title="Remover Administrador"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span className="text-xs">Remover</span>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Card: Adicionar Administrador */}
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5 space-y-2.5">
+            <label className="text-xs font-semibold text-foreground/90 flex items-center gap-1.5">
+              <UserPlus className="h-4 w-4 text-primary" />
+              Adicionar Administrador
+            </label>
+            <form onSubmit={handleAddAdmin} className="flex gap-2">
+              <Input
+                type="number"
+                placeholder="ID numérico (ex: 123456789)"
+                value={newAdminInput}
+                onChange={(e) => setNewAdminInput(e.target.value)}
+                className="bg-white/5 border-white/10 text-xs font-mono"
+              />
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!newAdminInput.trim() || savingAdmins}
+                className="shrink-0 flex items-center gap-1.5 text-xs font-medium px-3.5"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Adicionar
+              </Button>
+            </form>
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Dica: O usuário pode obter o próprio ID enviando mensagem para o bot <span className="text-primary font-mono">@userinfobot</span> no Telegram.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter className="pt-2">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setAdminModalOpen(false)}
+          >
+            Fechar
+          </Button>
+        </DialogFooter>
       </Dialog>
     </div>
   );
