@@ -263,7 +263,7 @@ test('aprovação publica no canal com descrição, tags, link e dois botões in
   assert.match(channelPost.p.caption, /<b>Filmes &amp; Pipoca<\/b>/);
   assert.match(channelPost.p.caption, /<blockquote>Resumos e indicações diárias\.<\/blockquote>/);
   assert.match(channelPost.p.caption, /#filmes #dicas/);
-  assert.match(channelPost.p.caption, /https:\/\/t\.me\/filmespipoca/);
+  assert.equal(channelPost.p.caption.includes('https://t.me/filmespipoca'), false);
 
   // Check the two interactive buttons: 1. Canal, 2. Bot promotion link
   const buttons = channelPost.p.reply_markup.inline_keyboard;

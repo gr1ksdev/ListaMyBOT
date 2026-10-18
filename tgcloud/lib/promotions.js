@@ -422,9 +422,7 @@ export function formatPromoChannelMessage(promo) {
 
 <blockquote>${escHtml(promo.description)}</blockquote>
 
-${escHtml(promo.category)}
-
-${promo.url}`;
+${escHtml(promo.category)}`;
 }
 
 export function promoTemplate() {
