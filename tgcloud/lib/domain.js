@@ -6,7 +6,19 @@ export function isOwner(id) {
 }
 export const APP_URL = 'https://app8718726006.tgcloud.ai/';
 export const CATEGORIES = ['🌏 PADRÃO','🔞 Adulto +18','👫 Amizades','🏛 Apostas','😂 Comédia e Humor','🚩 Cursos','📍 Entretenimento','🎬 Filmes e Séries','💸 Investimentos','📚 Livros','🎵 Músicas','📰 Notícias'];
-export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0 };
+export const DEFAULT_LIST_ADS = {
+ enabled: false,
+ mode: 'fixed',
+ sameAdAcrossSlots: true,
+ slots: {
+  start: { enabled: false, adId: null },
+  middle: { enabled: false, adId: null },
+  end: { enabled: false, adId: null }
+ },
+ randomPool: [],
+ fixedAdId: null
+};
+export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)) };
 export function validateSettings(input, now=Date.now()) {
  const s=JSON.parse(JSON.stringify(input));
  s.minMembers=s.minMembers??0;
@@ -50,6 +62,33 @@ export function validateSettings(input, now=Date.now()) {
  s.promoLogTopic = Number.isSafeInteger(s.promoLogTopic) ? s.promoLogTopic : 0;
  s.chatsLogTopic = Number.isSafeInteger(s.chatsLogTopic) ? s.chatsLogTopic : 0;
  s.promoChannel = typeof s.promoChannel === 'string' ? s.promoChannel : (Number.isSafeInteger(s.promoChannel) ? String(s.promoChannel) : '');
+ s.listType = ['mixed', 'simple'].includes(s.listType) ? s.listType : 'mixed';
+ if (s.listAdsConfig && typeof s.listAdsConfig === 'object') {
+  const lac = s.listAdsConfig;
+  s.listAdsConfig = {
+   enabled: Boolean(lac.enabled),
+   mode: ['fixed', 'random'].includes(lac.mode) ? lac.mode : 'fixed',
+   sameAdAcrossSlots: Boolean(lac.sameAdAcrossSlots),
+   slots: {
+    start: {
+     enabled: Boolean(lac.slots?.start?.enabled),
+     adId: Number.isSafeInteger(lac.slots?.start?.adId) ? lac.slots.start.adId : null
+    },
+    middle: {
+     enabled: Boolean(lac.slots?.middle?.enabled),
+     adId: Number.isSafeInteger(lac.slots?.middle?.adId) ? lac.slots.middle.adId : null
+    },
+    end: {
+     enabled: Boolean(lac.slots?.end?.enabled),
+     adId: Number.isSafeInteger(lac.slots?.end?.adId) ? lac.slots.end.adId : null
+    }
+   },
+   randomPool: Array.isArray(lac.randomPool) ? lac.randomPool.filter(x => Number.isSafeInteger(x) && x > 0) : [],
+   fixedAdId: Number.isSafeInteger(lac.fixedAdId) ? lac.fixedAdId : null
+  };
+ } else {
+  s.listAdsConfig = JSON.parse(JSON.stringify(DEFAULT_LIST_ADS));
+ }
  return s;
 }
 export function nextTime(a, now=Date.now()) {
@@ -71,6 +110,63 @@ export function resolveButtonStyle(c, s) {
  if (s?.buttonColor && AD_STYLES.includes(s.buttonColor)) return s.buttonColor;
  return '';
 }
+export function resolveListAds(s, ads = [], seed = 0) {
+ if (!s?.listAdsConfig?.enabled || !Array.isArray(ads) || !ads.length) {
+  return { start: null, middle: null, end: null };
+ }
+ const cfg = s.listAdsConfig;
+ const validAds = ads.filter(a => a && a.title && a.url);
+ if (!validAds.length) return { start: null, middle: null, end: null };
+ const adsById = new Map(validAds.map(a => [a.id, a]));
+
+ const activeSlots = [];
+ if (cfg.slots?.start?.enabled) activeSlots.push('start');
+ if (cfg.slots?.middle?.enabled) activeSlots.push('middle');
+ if (cfg.slots?.end?.enabled) activeSlots.push('end');
+ if (!activeSlots.length) return { start: null, middle: null, end: null };
+
+ const result = { start: null, middle: null, end: null };
+
+ if (cfg.mode === 'fixed') {
+  if (cfg.sameAdAcrossSlots) {
+   const targetId = cfg.fixedAdId || cfg.slots?.start?.adId || cfg.slots?.middle?.adId || cfg.slots?.end?.adId;
+   const targetAd = (targetId && adsById.get(targetId)) || validAds[0];
+   for (const slot of activeSlots) result[slot] = targetAd;
+  } else {
+   if (cfg.slots?.start?.enabled) {
+    result.start = (cfg.slots.start.adId && adsById.get(cfg.slots.start.adId)) || validAds[0];
+   }
+   if (cfg.slots?.middle?.enabled) {
+    result.middle = (cfg.slots.middle.adId && adsById.get(cfg.slots.middle.adId)) || validAds[1] || validAds[0];
+   }
+   if (cfg.slots?.end?.enabled) {
+    result.end = (cfg.slots.end.adId && adsById.get(cfg.slots.end.adId)) || validAds[2] || validAds[0];
+   }
+  }
+ } else if (cfg.mode === 'random') {
+  let pool = (cfg.randomPool || []).map(id => adsById.get(id)).filter(Boolean);
+  if (!pool.length) pool = validAds.slice();
+
+  if (cfg.sameAdAcrossSlots) {
+   const pickIndex = Math.abs(seed) % pool.length;
+   const picked = pool[pickIndex];
+   for (const slot of activeSlots) result[slot] = picked;
+  } else {
+   const shuffled = [...pool].sort((a, b) => {
+    const hashA = (a.id * 31 + seed) % 1000;
+    const hashB = (b.id * 31 + seed) % 1000;
+    return hashA - hashB;
+   });
+   let i = 0;
+   for (const slot of activeSlots) {
+    result[slot] = shuffled[i % shuffled.length];
+    i++;
+   }
+  }
+ }
+
+ return result;
+}
 export function makePages(chats,s,seed=0,ads=[]) {
  let list=chats.filter(c=>c.status==='approved'&&validLink(c.url)).slice();
  if(s.order==='manual')list.sort((a,b)=>a.position-b.position||a.id-b.id);
@@ -85,9 +181,39 @@ export function makePages(chats,s,seed=0,ads=[]) {
    ...(style?{style}:{})
   };
  });
- const slots=(ads||[]).filter(a=>a.title&&a.url).map(a=>({row:a.slot_row,col:a.slot_col,button:{text:String(a.title).slice(0,60),url:a.url,...(AD_STYLES.includes(a.style)?{style:a.style}:{})}}));
- const groups=paginateRows(repeatRows(buttons,layoutPattern(s),slots));
- const pages=groups.map((rows,i)=>({text:s.text+(groups.length>1?`\n\nParte ${i+1}/${groups.length}`:''),reply_markup:{inline_keyboard:rows}}));
+
+ const promoSlots = resolveListAds(s, ads, seed);
+ const hasNewAds = Boolean(promoSlots.start || promoSlots.middle || promoSlots.end);
+
+ let rows;
+ if (hasNewAds) {
+  rows = repeatRows(buttons, layoutPattern(s), []);
+  const makeButton = (ad) => ({
+   text: String(ad.title).slice(0, 60),
+   url: ad.url,
+   ...(AD_STYLES.includes(ad.style) ? { style: ad.style } : {})
+  });
+  if (promoSlots.end) {
+   rows.push([makeButton(promoSlots.end)]);
+  }
+  if (promoSlots.middle) {
+   if (rows.length === 0) {
+    rows.push([makeButton(promoSlots.middle)]);
+   } else {
+    const midIdx = Math.max(1, Math.floor(rows.length / 2));
+    rows.splice(midIdx, 0, [makeButton(promoSlots.middle)]);
+   }
+  }
+  if (promoSlots.start) {
+   rows.unshift([makeButton(promoSlots.start)]);
+  }
+ } else {
+  const slots=(ads||[]).filter(a=>a.title&&a.url).map(a=>({row:a.slot_row,col:a.slot_col,button:{text:String(a.title).slice(0,60),url:a.url,...(AD_STYLES.includes(a.style)?{style:a.style}:{})}}));
+  rows = repeatRows(buttons, layoutPattern(s), slots);
+ }
+
+ const groups=paginateRows(rows);
+ const pages=groups.map((pageRows,i)=>({text:s.text+(groups.length>1?`\n\nParte ${i+1}/${groups.length}`:''),reply_markup:{inline_keyboard:pageRows}}));
  return pages;
 }
 export function validLink(s){return typeof s==='string'&&/^https:\/\/t\.me\/(?:[A-Za-z][A-Za-z0-9_]{3,}|\+[A-Za-z0-9_-]+|joinchat\/[A-Za-z0-9_-]+)\/?$/.test(s);}

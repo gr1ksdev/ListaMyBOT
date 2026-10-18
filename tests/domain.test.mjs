@@ -63,3 +63,64 @@ test('cores dos botões: global, tipo canal/grupo e individual com precedência 
  assert.equal(rows[2].style,'danger');
  assert.equal(rows[3].style,'danger');
 });
+
+test('listType validação e valor padrão',()=>{
+ assert.equal(validateSettings({...DEFAULTS,listType:'simple'}).listType,'simple');
+ assert.equal(validateSettings({...DEFAULTS,listType:'mixed'}).listType,'mixed');
+ assert.equal(validateSettings({...DEFAULTS,listType:'invalid'}).listType,'mixed');
+});
+
+test('resolveListAds e makePages com posições início, meio e fim',()=>{
+ const chats = Array.from({length: 6}, (_, i) => ({
+  id: i + 1, position: i, title: 'Chat ' + (i + 1), url: 'https://t.me/chat' + (i + 1), status: 'approved', category: 0
+ }));
+ const ads = [
+  { id: 101, title: 'Patrocinador Topo', url: 'https://t.me/topo', style: 'primary' },
+  { id: 102, title: 'Patrocinador Centro', url: 'https://t.me/centro', style: 'success' },
+  { id: 103, title: 'Patrocinador Rodapé', url: 'https://t.me/rodape', style: 'danger' }
+ ];
+
+ const s = {
+  ...DEFAULTS,
+  order: 'manual',
+  rowPattern: [2, 2],
+  listAdsConfig: {
+   enabled: true,
+   mode: 'fixed',
+   sameAdAcrossSlots: false,
+   slots: {
+    start: { enabled: true, adId: 101 },
+    middle: { enabled: true, adId: 102 },
+    end: { enabled: true, adId: 103 }
+   }
+  }
+ };
+
+ const pages = makePages(chats, s, 0, ads);
+ const rows = pages[0].reply_markup.inline_keyboard;
+ // Top slot (início)
+ assert.equal(rows[0][0].text, 'Patrocinador Topo');
+ assert.equal(rows[0][0].style, 'primary');
+ // End slot (fim)
+ assert.equal(rows[rows.length - 1][0].text, 'Patrocinador Rodapé');
+ assert.equal(rows[rows.length - 1][0].style, 'danger');
+ // Middle slot exists
+ const mid = rows.find(r => r.length === 1 && r[0].text === 'Patrocinador Centro');
+ assert.ok(mid);
+ assert.equal(mid[0].style, 'success');
+
+ // Test sameAdAcrossSlots
+ const sSame = {
+  ...s,
+  listAdsConfig: {
+   ...s.listAdsConfig,
+   sameAdAcrossSlots: true,
+   fixedAdId: 102
+  }
+ };
+ const pagesSame = makePages(chats, sSame, 0, ads);
+ const rowsSame = pagesSame[0].reply_markup.inline_keyboard;
+ assert.equal(rowsSame[0][0].text, 'Patrocinador Centro');
+ assert.equal(rowsSame[rowsSame.length - 1][0].text, 'Patrocinador Centro');
+});
+

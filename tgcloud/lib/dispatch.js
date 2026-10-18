@@ -10,8 +10,27 @@ export async function unlock(){await putState('dispatch_lock',0);}
 export async function createRound(){
  if(await db.get("SELECT id FROM list_rounds WHERE status='active' LIMIT 1"))throw new EndpointError('Já existe um envio em andamento.');
  const {settings}=await config();const [list,ads]=await Promise.all([db.all("SELECT * FROM list_chats WHERE status='approved'"),db.all('SELECT * FROM list_ads ORDER BY slot_row,slot_col,id')]);
- const pages=makePages(list,settings,Math.floor(Date.now()/60000),ads);if(!pages.length)throw new EndpointError('Nenhum participante aprovado com link válido.');
- const id=String(Date.now());await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')',{':id':id,':n':Date.now(),':c':JSON.stringify({pages,settings,destinations:list.map(c=>c.id)})});return id;
+ const seed = Math.floor(Date.now()/60000);
+ if (settings.listType === 'simple') {
+  const channelList = list.filter(c => c.type === 'channel');
+  const groupList = list.filter(c => c.type !== 'channel');
+  const channelPages = makePages(channelList, settings, seed, ads);
+  const groupPages = makePages(groupList, settings, seed, ads);
+  if (!channelPages.length && !groupPages.length) throw new EndpointError('Nenhum participante aprovado com link válido.');
+  const id = String(Date.now());
+  const content = {
+   settings,
+   listType: 'simple',
+   channelPages,
+   groupPages,
+   pages: channelPages.length ? channelPages : groupPages,
+   destinations: list.map(c => c.id)
+  };
+  await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')', { ':id': id, ':n': Date.now(), ':c': JSON.stringify(content) });
+  return id;
+ }
+ const pages=makePages(list,settings,seed,ads);if(!pages.length)throw new EndpointError('Nenhum participante aprovado com link válido.');
+ const id=String(Date.now());await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')',{':id':id,':n':Date.now(),':c':JSON.stringify({pages,settings,listType:'mixed',destinations:list.map(c=>c.id)})});return id;
 }
 export async function removeLists() {
  const chats = await db.all("SELECT id, last_messages FROM list_chats WHERE last_messages != '[]' AND last_messages != ''");
@@ -68,10 +87,19 @@ export async function processQueue({scheduled=false}={}){
  const chat=await getChat(job.chat);
  if(!chat||chat.status!=='approved'){await finish(job,'skipped','Participação inativa');continue;}
  const claim=await db.run("UPDATE list_deliveries SET status='sending',available=:n,attempts=attempts+1 WHERE id=:id AND status='pending'",{':n':now+120000,':id':job.id});if(!claim.rowsAffected)continue;
+ let targetPages=content.pages;
+ if(content.listType==='simple'){
+  const isChannel=chat.type==='channel';
+  targetPages=isChannel?content.channelPages:content.groupPages;
+  if(!targetPages||!targetPages.length){
+   await finish(job,'skipped',isChannel?'Nenhum canal na lista simples':'Nenhum grupo na lista simples');
+   continue;
+  }
+ }
  let sent;
  try{
  const missing=await rights(chat);if(missing.length){await db.run("UPDATE list_chats SET status='paused',error=:e WHERE id=:id",{':e':missing.join(', '),':id':chat.id});await finish(job,'failed','Faltam permissões: '+missing.join(', '));continue;}
- sent=await api.sendMessage({chat_id:chat.id,...content.pages[job.page],link_preview_options:{is_disabled:true}});
+ sent=await api.sendMessage({chat_id:chat.id,...targetPages[job.page],link_preview_options:{is_disabled:true}});
  }catch(e){
  const message=String(e.description||e.message||'Falha de comunicação').slice(0,300);
  if(e.code===429){await db.run("UPDATE list_deliveries SET status='pending',available=:n,error=:e WHERE id=:id",{':n':Date.now()+Math.max(1,e.parameters?.retry_after||60)*1000,':e':message,':id':job.id});break;}
@@ -80,8 +108,8 @@ export async function processQueue({scheduled=false}={}){
  }
  const ids=[...JSON.parse(job.messages),sent.message_id];const page=job.page+1;
  // Persist the message ID before optional pin/delete operations.
- await db.run('UPDATE list_deliveries SET messages=:m,page=:p,status=:s,available=:n,error=\'\' WHERE id=:id',{':m':JSON.stringify(ids),':p':page,':s':page===content.pages.length?'sent':'pending',':n':Date.now()+1500,':id':job.id});
- if(page===content.pages.length){
+ await db.run('UPDATE list_deliveries SET messages=:m,page=:p,status=:s,available=:n,error=\'\' WHERE id=:id',{':m':JSON.stringify(ids),':p':page,':s':page===targetPages.length?'sent':'pending',':n':Date.now()+1500,':id':job.id});
+ if(page===targetPages.length){
  const warnings=[];
  if(content.settings.pin)try{await api.pinChatMessage({chat_id:chat.id,message_id:ids[0],disable_notification:true});}catch{warnings.push('Lista enviada, mas não foi possível fixar.');}
  if(content.settings.deletePrevious)for(const old of JSON.parse(chat.last_messages))try{await api.deleteMessage({chat_id:chat.id,message_id:old});}catch{warnings.push('Uma mensagem anterior não pôde ser apagada.');}

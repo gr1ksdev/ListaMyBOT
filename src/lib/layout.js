@@ -64,3 +64,69 @@ export function paginateRows(rows, maxButtons = 40, maxRows = 20) {
   if (page.length) pages.push(page);
   return pages;
 }
+
+export function resolveListAds(s, ads = [], seed = 0) {
+  if (!s?.listAdsConfig?.enabled || !Array.isArray(ads) || !ads.length) {
+    return { start: null, middle: null, end: null };
+  }
+  const cfg = s.listAdsConfig;
+  const validAds = ads.filter((a) => a && a.title && a.url);
+  if (!validAds.length) return { start: null, middle: null, end: null };
+  const adsById = new Map(validAds.map((a) => [a.id, a]));
+
+  const activeSlots = [];
+  if (cfg.slots?.start?.enabled) activeSlots.push('start');
+  if (cfg.slots?.middle?.enabled) activeSlots.push('middle');
+  if (cfg.slots?.end?.enabled) activeSlots.push('end');
+  if (!activeSlots.length) return { start: null, middle: null, end: null };
+
+  const result = { start: null, middle: null, end: null };
+
+  if (cfg.mode === 'fixed') {
+    if (cfg.sameAdAcrossSlots) {
+      const targetId =
+        cfg.fixedAdId ||
+        cfg.slots?.start?.adId ||
+        cfg.slots?.middle?.adId ||
+        cfg.slots?.end?.adId;
+      const targetAd = (targetId && adsById.get(targetId)) || validAds[0];
+      for (const slot of activeSlots) result[slot] = targetAd;
+    } else {
+      if (cfg.slots?.start?.enabled) {
+        result.start = (cfg.slots.start.adId && adsById.get(cfg.slots.start.adId)) || validAds[0];
+      }
+      if (cfg.slots?.middle?.enabled) {
+        result.middle =
+          (cfg.slots.middle.adId && adsById.get(cfg.slots.middle.adId)) ||
+          validAds[1] ||
+          validAds[0];
+      }
+      if (cfg.slots?.end?.enabled) {
+        result.end =
+          (cfg.slots.end.adId && adsById.get(cfg.slots.end.adId)) || validAds[2] || validAds[0];
+      }
+    }
+  } else if (cfg.mode === 'random') {
+    let pool = (cfg.randomPool || []).map((id) => adsById.get(id)).filter(Boolean);
+    if (!pool.length) pool = validAds.slice();
+
+    if (cfg.sameAdAcrossSlots) {
+      const pickIndex = Math.abs(seed) % pool.length;
+      const picked = pool[pickIndex];
+      for (const slot of activeSlots) result[slot] = picked;
+    } else {
+      const shuffled = [...pool].sort((a, b) => {
+        const hashA = (a.id * 31 + seed) % 1000;
+        const hashB = (b.id * 31 + seed) % 1000;
+        return hashA - hashB;
+      });
+      let i = 0;
+      for (const slot of activeSlots) {
+        result[slot] = shuffled[i % shuffled.length];
+        i++;
+      }
+    }
+  }
+
+  return result;
+}
