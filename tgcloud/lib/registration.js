@@ -14,10 +14,17 @@ const STATUS = {
  paused: '⏸ Participação pausada'
 };
 
-export function keyboard(c){
+export function keyboard(c, target = c.id){
  const rows=[];
- for(let i=0;i<CATEGORIES.length;i+=2)rows.push(CATEGORIES.slice(i,i+2).map((text,j)=>({text:(c.category===i+j?'✓ ':'')+text,callback_data:`cat:${c.id}:${i+j}`})));
- rows.push([{text:'Continuar ›',callback_data:`cfg:${c.id}`}],[{text:'‹ Voltar',callback_data:`cfg:${c.id}`}]);
+ for(let i=0;i<CATEGORIES.length;i+=2)rows.push(CATEGORIES.slice(i,i+2).map((text,j)=>({
+  text,
+  callback_data:`cat:${c.id}:${i+j}`,
+  style: c.category === i + j ? 'success' : 'primary'
+ })));
+ rows.push([{text:'✅ Enviar cadastro',callback_data:`submit:${c.id}`,style:'success'}]);
+ const navRow=[{text:'‹ Voltar',callback_data:`cfg:${c.id}`,style:'primary'}];
+ if(target<0)navRow.push({text:'❌ Cancelar',callback_data:`cancel:${c.id}`,style:'danger'});
+ rows.push(navRow);
  return {inline_keyboard:rows};
 }
 
@@ -35,38 +42,41 @@ export async function menu(c,target=c.id,message,view='summary'){
  let rows=[];
 
  if(membershipBlocked(c)){
-  text=`🚫 ${tgLink('Cadastro Rejeitado')} • <b><i>${title}</i></b>\n\n`+
-   `<blockquote><b>⚠️ Critérios de Participação\n`+
+  text=`🚫 ${tgLink('Critérios de Entrada')} • <b><i>${title}</i></b>\n\n`+
+   `<blockquote><b>⚠️ Verificação de Elegibilidade\n`+
    ` ┣ ${typeIcon} Tipo • ${tgLink(typeName)}\n`+
    ` ┣ ❌ Status • Rejeitado\n`+
    ` ┗ 💬 Motivo • ${escHtml(c.error)}\n</b></blockquote>\n\n`+
    `<b><i>💡 Ajuste os requisitos do seu ${tgLink(typeName)} e toque no botão abaixo para verificar novamente!</i></b>`;
   rows=[[{text:'↻ Verificar novamente',callback_data:`recheck:${c.id}`}]];
+  if(target<0)rows.push([{text:'❌ Cancelar',callback_data:`cancel:${c.id}`,style:'danger'}]);
  }else if(view==='categories'&&editable){
-  const selCat=CATEGORIES[c.category]||'Nenhuma selecionada';
+  const selCat=CATEGORIES[c.category]||'Ainda não definida';
   text=`🏷 ${tgLink('Categorias')} • <b><i>${title}</i></b>\n\n`+
    `<blockquote><b>📂 Configuração de Nicho\n`+
    ` ┣ ${typeIcon} Tipo • ${tgLink(typeName)}\n`+
    ` ┗ 🎯 Categoria • ${selCat}\n</b></blockquote>\n\n`+
-   `<b><i>✨ Escolha a categoria do seu ${tgLink(typeName)} abaixo para direcionar o público na ${tgLink('Lista')}. Depois toque em Continuar:</i></b>`;
-  rows=keyboard(c).inline_keyboard;
+   `<b><i>✨ Escolha a categoria do seu ${tgLink(typeName)} abaixo para direcionar o público na ${tgLink('Lista')}:</i></b>`;
+  rows=keyboard(c,target).inline_keyboard;
  }else if(view==='link'){
   if(editable){
    text=`🔗 ${tgLink('Link de Acesso')} • <b><i>${title}</i></b>\n\n`+
-    `<blockquote><b>🌐 Configuração do Link\n`+
+    `<blockquote><b>🌐 Configuração de Link\n`+
     ` ┣ ${typeIcon} Tipo • ${tgLink(typeName)}\n`+
-    ` ┣ 🔗 Link Atual • ${c.url?escHtml(c.url):'Ainda não informado'}\n`+
-    ` ┗ 📝 Formato • https://t.me/seunome ou link de convite\n</b></blockquote>\n\n`+
-    `<b><i>💬 Envie o link do seu ${tgLink(typeName)} aqui no chat (ou use <code>/link URL</code>). Toque em Voltar para cancelar:</i></b>`;
+    ` ┣ 🔗 Link Registrado • ${c.url?escHtml(c.url):'Pendente'}\n`+
+    ` ┗ 📝 Formato Aceito • https://t.me/seunome ou link de convite oficial\n</b></blockquote>\n\n`+
+    `<b><i>💬 Envie o link do seu ${tgLink(typeName)} aqui no chat (ou use <code>/link URL</code>):</i></b>`;
   }else{
    text=`🔗 ${tgLink('Link de Acesso')} • <b><i>${title}</i></b>\n\n`+
     `<blockquote><b>🌐 Link Cadastrado\n`+
     ` ┣ ${typeIcon} Tipo • ${tgLink(typeName)}\n`+
     ` ┣ 🔗 Link • ${c.url?escHtml(c.url):'Indisponível'}\n`+
-    ` ┗ 🔒 Status • Cadastro em análise ou aprovado\n</b></blockquote>\n\n`+
+    ` ┗ 🔒 Status • Em análise ou aprovado\n</b></blockquote>\n\n`+
     `<b><i>✨ Este cadastro já foi enviado. Alterações posteriores podem ser solicitadas ao ${tgLink('Suporte')}.</i></b>`;
   }
-  rows=[[{text:'‹ Voltar',callback_data:`cfg:${c.id}`}]];
+  const navRow=[{text:'‹ Voltar',callback_data:`cfg:${c.id}`,style:'primary'}];
+  if(target<0)navRow.push({text:'❌ Cancelar',callback_data:`cancel:${c.id}`,style:'danger'});
+  rows=[navRow];
  }else{
   const statusLabel=STATUS[c.status]||c.status;
   const catLabel=CATEGORIES[c.category]||'Ainda não selecionada';
@@ -78,31 +88,30 @@ export async function menu(c,target=c.id,message,view='summary'){
    ` ┣ 🏷 Categoria • ${catLabel}\n`+
    ` ┗ 🔗 Link • ${urlLabel}\n</b></blockquote>\n\n`+
    (editable
-     ? `<b><i>✨ Defina a categoria e o link nos botões abaixo e depois envie para aprovação na ${tgLink('Lista')}!</i></b>`
-     : `<b><i>✨ Seu cadastro foi enviado! Acompanhe o status e as divulgações pelo menu.</i></b>`);
+     ? `<b><i>✨ Defina a categoria abaixo e depois envie para aprovação na ${tgLink('Lista')}!</i></b>`
+     : `<b><i>✨ Sua comunidade está cadastrada! Acompanhe o status e as divulgações pelo menu principal.</i></b>`);
 
   if(editable){
    rows=[
     [
-     {text:'🏷 Escolher categoria',callback_data:`cats:${c.id}`},
-     {text:'🔗 Editar link',callback_data:`link:${c.id}`}
+     {text:'🏷 Escolher categoria',callback_data:`cats:${c.id}`}
     ],
     [
-     {text:'✅ Enviar cadastro',callback_data:`submit:${c.id}`}
+     {text:'✅ Enviar cadastro',callback_data:`submit:${c.id}`,style:'success'}
     ]
    ];
   }else{
    rows=[[{text:'↻ Atualizar status',callback_data:`cfg:${c.id}`}]];
   }
- }
 
- if(target>0){
-  rows.push([
-   {text:'👤 Meu Perfil',callback_data:'nav:profile'},
-   {text:'🏠 Início',callback_data:'nav:home'}
-  ]);
- }else{
-  rows.push([{text:'Continuar no privado ↗',url:`https://t.me/${me.username}?start=${c.id}`}]);
+  if(target>0){
+   rows.push([
+    {text:'👤 Meu Perfil',callback_data:'nav:profile'},
+    {text:'🏠 Início',callback_data:'nav:home'}
+   ]);
+  }else{
+   rows.push([{text:'❌ Cancelar',callback_data:`cancel:${c.id}`,style:'danger'}]);
+  }
  }
 
  const key=target>0?`private_menu:${target}`:`config_menu:${target}:${c.id}`;
@@ -122,15 +131,28 @@ export async function register(chat,actor){
   const isChannel=chat.type==='channel';
   const typeName=isChannel?'Canal':'Grupo';
   const typeIcon=isChannel?'📢':'💬';
+  const chatTypeWord=isChannel?'canal':'grupo';
+  const botName=me.first_name||me.username||'ListaMyBOT';
+
+  if(missing.includes('tornar o bot administrador')){
+   await api.sendMessage({
+    chat_id:chat.id,
+    text:`⚠️ Este ${chatTypeWord} precisa que o bot seja administrador.\nO <b>${escHtml(botName)}</b> requer permissões de administrador para operar. Saindo...`,
+    parse_mode:'HTML'
+   });
+   try{await api.leaveChat({chat_id:chat.id});}catch{}
+   return;
+  }
+
   const permissionsList=missing.map(p=>` ┣ 🔑 ${p}`).join('\n');
 
   await api.sendMessage({
    chat_id:chat.id,
-   text:`⚠️ ${tgLink('Permissões')} • <b><i>Configuração do ${tgLink(typeName)}</i></b>\n\n`+
-    `<blockquote><b>${typeIcon} Permissões Necessárias\n`+
+   text:`🛡️ ${tgLink('Permissões Necessárias')} • <b><i>Configuração do ${tgLink(typeName)}</i></b>\n\n`+
+    `<blockquote><b>${typeIcon} Acesso Administrativo\n`+
     `Para que este ${tgLink(typeName)} participe da ${tgLink('Lista')}, conceda:\n`+
     `${permissionsList}\n</b></blockquote>\n\n`+
-    `<b><i>✨ Após conceder as permissões ao bot, envie <code>/configurar</code> no chat para continuar!</i></b>`,
+    `<b><i>✨ Assim que ativar as permissões do bot, envie <code>/configurar</code> no chat para prosseguir!</i></b>`,
    parse_mode:'HTML'
   });
   return;

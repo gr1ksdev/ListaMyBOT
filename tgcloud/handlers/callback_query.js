@@ -9,7 +9,7 @@ import { formatChatSubmissionMessage, chatSubmissionKeyboard } from '../lib/chat
 export default async function(q){
  if(!q.message)return;
  const [action,raw,value]=String(q.data||'').split(':');const target=q.message.chat.id;const user=q.from.id;
- if(!['nav','cfg','cats','cat','link','submit','recheck','promo','chat_adm'].includes(action))return;
+ if(!['nav','cfg','cats','cat','link','submit','recheck','promo','chat_adm','cancel'].includes(action))return;
  let answered=false;const answer=async(text,alert=false)=>{if(!answered){await api.answerCallbackQuery({callback_query_id:q.id,...(text?{text,show_alert:alert}:{})});answered=true;}};
  try{
  if(action==='promo'){
@@ -110,6 +110,27 @@ export default async function(q){
  }
  const id=Number(raw);if(!Number.isSafeInteger(id))return;const c=await getChat(id);
  if(!c||(target<0&&target!==c.id)||!await chatAdmin(id,user))throw Error('Somente administradores deste chat podem configurar.');
+ if(action==='cancel'){
+  await answer('Configuração cancelada.');
+  if(target<0){
+   await closeMenu(c,target,q.message.message_id);
+   const me=await api.getMe();
+   const botName=me.first_name||me.username||'ListaMyBOT';
+   const chatTypeWord=c.type==='channel'?'canal':'grupo';
+   try{
+    await api.sendMessage({
+     chat_id:target,
+     text:`⚠️ Cadastro cancelado.\nO <b>${escHtml(botName)}</b> está saindo do ${chatTypeWord}...`,
+     parse_mode:'HTML'
+    });
+   }catch{}
+   try{await api.leaveChat({chat_id:target});}catch{}
+   await db.run("UPDATE list_chats SET status='paused',error='Cadastro cancelado',updated=:n WHERE id=:id",{':n':Date.now(),':id':c.id});
+  }else{
+   await privateScreen(user,'chats',q.message,q.from);
+  }
+  return;
+ }
  if(action==='recheck'){await answer();await register({id:c.id,title:c.title,type:c.type},user);return;}
  if(membershipBlocked(c)&&['cats','cat','link'].includes(action))throw Error(c.error);
  const editable=!['pending','approved'].includes(c.status);

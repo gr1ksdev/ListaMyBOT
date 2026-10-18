@@ -361,17 +361,17 @@ async function handleMessage(m){
   const me=await api.getMe();
   const botLink=`tg://user?id=${me.id}`;
   if(!results.length){
-   await screen(user,`private_menu:${user}`,`🔍 <a href="${botLink}"><b><i>Pesquisar</i></b></a>\n\n<blockquote><b><i>Nenhum canal ou grupo encontrado para “${escHtml(text)}”.</i></b></blockquote>\n\n<b><i>Tente pesquisar por outro nome ou termo.</i></b>`,[[{text:'🔍 Pesquisar novamente',callback_data:'nav:search'}],[{text:'🏠 Início',callback_data:'nav:home'}]]);
+   await screen(user,`private_menu:${user}`,`🔍 <a href="${botLink}"><b><i>Explorar Comunidades</i></b></a>\n\n<blockquote><b><i>Nenhuma comunidade encontrada para “${escHtml(text)}”.</i></b></blockquote>\n\n<b><i>Tente pesquisar por outro nicho ou termo.</i></b>`,[[{text:'🔍 Pesquisar novamente',callback_data:'nav:search'}],[{text:'🏠 Início',callback_data:'nav:home'}]]);
    return;
   }
   const rows=results.map(c=>[{text:'📢 '+(c.display||c.title).slice(0,45),url:c.url}]);
   rows.push([{text:'🔍 Nova pesquisa',callback_data:'nav:search'},{text:'🏠 Início',callback_data:'nav:home'}]);
-  await screen(user,`private_menu:${user}`,`🔍 <a href="${botLink}"><b><i>Resultados da Pesquisa</i></b></a>\n\n<blockquote><b><i>Encontramos ${results.length} resultado(s) para “${escHtml(text)}”:</i></b></blockquote>\n\n<b><i>Toque em um dos botões abaixo para acessar:</i></b>`,rows);
+  await screen(user,`private_menu:${user}`,`🔍 <a href="${botLink}"><b><i>Resultados da Busca</i></b></a>\n\n<blockquote><b><i>Encontramos ${results.length} comunidade(s) para “${escHtml(text)}”:</i></b></blockquote>\n\n<b><i>Toque em um dos botões abaixo para acessar:</i></b>`,rows);
   return;
  }
  if(cmd==='/admin'){
- if(!await isAdmin(user)){await screen(user,`private_menu:${user}`,'Este painel é exclusivo dos administradores do bot.',[[{text:'🏠 Início',callback_data:'nav:home'}]]);return;}
- await screen(user,`private_menu:${user}`,'⚙️ Administração\n\nAbra o painel para aprovar participantes, editar sua lista e configurar os envios.',[[{text:'Abrir painel admin',web_app:{url:APP_URL}}],[{text:'🏠 Início',callback_data:'nav:home'}]]);return;}
+ if(!await isAdmin(user)){await screen(user,`private_menu:${user}`,'🚫 <b><i>Acesso Exclusivo</i></b>\n\n<blockquote><b><i>Este painel é restrito aos administradores do bot.</i></b></blockquote>',[[{text:'🏠 Início',callback_data:'nav:home'}]]);return;}
+ await screen(user,`private_menu:${user}`,'⚙️ <b><i>Painel Administrativo</i></b>\n\n<blockquote><b><i>Gerencie comunidades parceiras, aprove novos participantes, edite o layout da lista e configure os disparos automáticos.</i></b></blockquote>',[[{text:'⚙️ Abrir painel admin',web_app:{url:APP_URL}}],[{text:'🏠 Início',callback_data:'nav:home'}]]);return;}
  if(cmd==='/start'||cmd==='/configurar'){
   const id=/^-\d+$/.test(args[0]||'')?Number(args[0]):null;
   if(Number.isSafeInteger(id)){const c=await getChat(id);if(c&&await chatAdmin(c.id,user)){await putState(sessionKey,null);await menu(c,user);return;}}

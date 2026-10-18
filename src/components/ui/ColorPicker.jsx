@@ -27,7 +27,7 @@ export function ColorPicker({
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-1.5 p-1 rounded-xl bg-black/20 border border-white/10 select-none',
+        'w-full grid grid-cols-4 gap-1 p-1 rounded-xl bg-black/20 border border-white/10 select-none box-border',
         className
       )}
     >
@@ -40,7 +40,7 @@ export function ColorPicker({
             type="button"
             onClick={() => handleSelect(swatch.value)}
             className={cn(
-              'group flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 cursor-pointer',
+              'group flex items-center justify-center gap-1 sm:gap-1.5 px-1 sm:px-2 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 cursor-pointer min-w-0 w-full overflow-hidden',
               isSelected
                 ? 'bg-white/15 text-white shadow-sm ring-1 ring-white/20 font-semibold'
                 : 'text-white/60 hover:text-white hover:bg-white/5'
@@ -49,14 +49,14 @@ export function ColorPicker({
           >
             <span
               className={cn(
-                'relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full shadow-sm transition-transform',
+                'relative flex h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0 items-center justify-center rounded-full shadow-sm transition-transform',
                 swatch.colorClass,
                 isSelected && 'scale-110 ring-2 ring-white/40'
               )}
             >
-              {isSelected && <Check className="h-2.5 w-2.5 text-white stroke-[3]" />}
+              {isSelected && <Check className="h-2 w-2 sm:h-2.5 sm:w-2.5 text-white stroke-[3]" />}
             </span>
-            <span className="text-[11px]">{swatch.label}</span>
+            <span className="text-[10px] sm:text-[11px] truncate leading-tight">{swatch.label}</span>
           </button>
         );
       })}

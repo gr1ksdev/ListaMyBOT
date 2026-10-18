@@ -5,7 +5,20 @@ export function isOwner(id) {
  return OWNERS.includes(Number(id));
 }
 export const APP_URL = 'https://app8718726006.tgcloud.ai/';
-export const CATEGORIES = ['🌏 PADRÃO','🔞 Adulto +18','👫 Amizades','🏛 Apostas','😂 Comédia e Humor','🚩 Cursos','📍 Entretenimento','🎬 Filmes e Séries','💸 Investimentos','📚 Livros','🎵 Músicas','📰 Notícias'];
+export const CATEGORIES = [
+ '🎮 Jogos',
+ '📚 Estudos',
+ '🎵 Música',
+ '💻 Tecnologia',
+ '🎬 Entretenimento',
+ '⚽ Esportes',
+ '🎉 Amizades',
+ '🎨 Arte & Criatividade',
+ '🏥 Saúde & Bem-estar',
+ '🙏 Religião',
+ '🍥 Anime',
+ '📰 Notícias'
+];
 export const DEFAULT_LIST_ADS = {
  enabled: false,
  mode: 'fixed',
@@ -18,7 +31,7 @@ export const DEFAULT_LIST_ADS = {
  randomPool: [],
  fixedAdId: null
 };
-export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)) };
+export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)), footerButtons:true };
 export function validateSettings(input, now=Date.now()) {
  const s=JSON.parse(JSON.stringify(input));
  s.minMembers=s.minMembers??0;
@@ -89,6 +102,7 @@ export function validateSettings(input, now=Date.now()) {
  } else {
   s.listAdsConfig = JSON.parse(JSON.stringify(DEFAULT_LIST_ADS));
  }
+ s.footerButtons = s.footerButtons !== false;
  return s;
 }
 export function nextTime(a, now=Date.now()) {
@@ -117,7 +131,8 @@ export function resolveListAds(s, ads = [], seed = 0) {
  const cfg = s.listAdsConfig;
  const validAds = ads.filter(a => a && a.title && a.url);
  if (!validAds.length) return { start: null, middle: null, end: null };
- const adsById = new Map(validAds.map(a => [a.id, a]));
+ const getAdKey = a => (a.id != null ? a.id : a.key);
+ const adsById = new Map(validAds.map(a => [getAdKey(a), a]));
 
  const activeSlots = [];
  if (cfg.slots?.start?.enabled) activeSlots.push('start');
@@ -133,14 +148,26 @@ export function resolveListAds(s, ads = [], seed = 0) {
    const targetAd = (targetId && adsById.get(targetId)) || validAds[0];
    for (const slot of activeSlots) result[slot] = targetAd;
   } else {
-   if (cfg.slots?.start?.enabled) {
-    result.start = (cfg.slots.start.adId && adsById.get(cfg.slots.start.adId)) || validAds[0];
+   const usedIds = new Set();
+   for (const slot of activeSlots) {
+    const explicitId = cfg.slots?.[slot]?.adId;
+    if (explicitId && adsById.has(explicitId)) {
+     result[slot] = adsById.get(explicitId);
+     usedIds.add(explicitId);
+    }
    }
-   if (cfg.slots?.middle?.enabled) {
-    result.middle = (cfg.slots.middle.adId && adsById.get(cfg.slots.middle.adId)) || validAds[1] || validAds[0];
-   }
-   if (cfg.slots?.end?.enabled) {
-    result.end = (cfg.slots.end.adId && adsById.get(cfg.slots.end.adId)) || validAds[2] || validAds[0];
+   let fallbackIdx = 0;
+   for (const slot of activeSlots) {
+    if (!result[slot]) {
+     let candidate = validAds.find(a => !usedIds.has(getAdKey(a)));
+     if (candidate) {
+      result[slot] = candidate;
+      usedIds.add(getAdKey(candidate));
+     } else {
+      result[slot] = validAds[fallbackIdx % validAds.length];
+      fallbackIdx++;
+     }
+    }
    }
   }
  } else if (cfg.mode === 'random') {
@@ -210,6 +237,15 @@ export function makePages(chats,s,seed=0,ads=[]) {
  } else {
   const slots=(ads||[]).filter(a=>a.title&&a.url).map(a=>({row:a.slot_row,col:a.slot_col,button:{text:String(a.title).slice(0,60),url:a.url,...(AD_STYLES.includes(a.style)?{style:a.style}:{})}}));
   rows = repeatRows(buttons, layoutPattern(s), slots);
+ }
+
+ if (s.footerButtons !== false) {
+  const botUsername = s.botUsername || 'ListaMyBOT';
+  const botAddUrl = `https://t.me/${botUsername}?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users`;
+  rows.push([
+   { text: 'Add-me em C/G', url: botAddUrl, style: 'primary' },
+   { text: 'Canal Oficial', url: 'https://t.me/ChannelLogBM', style: 'success' }
+  ]);
  }
 
  const groups=paginateRows(rows);

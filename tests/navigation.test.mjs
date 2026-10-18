@@ -5,7 +5,7 @@ globalThis.__NAV_SDK=sdk;
 registerHooks({resolve(specifier,ctx,next){if(specifier==='sdk')return {url:'test:sdk',shortCircuit:true};return next(specifier,ctx);},load(url,ctx,next){if(url==='test:sdk')return {format:'module',source:'export const {db,api,EndpointError}=globalThis.__NAV_SDK;',shortCircuit:true};return next(url,ctx);}});
 const {default:message}=await import('../tgcloud/handlers/message.js');const {default:callback}=await import('../tgcloud/handlers/callback_query.js');const {default:moderate}=await import('../tgcloud/endpoints/moderateChat.js');
 beforeEach(()=>{sql?.close();sql=new DatabaseSync(':memory:');sql.exec(`CREATE TABLE list_runtime(id TEXT PRIMARY KEY,value TEXT);CREATE TABLE list_settings(id INTEGER PRIMARY KEY,value TEXT,version INTEGER);CREATE TABLE list_chats(id INTEGER PRIMARY KEY,title TEXT,type TEXT,url TEXT DEFAULT '',category INTEGER DEFAULT -1,status TEXT DEFAULT 'draft',owner INTEGER,updated INTEGER,menu_chat INTEGER,menu_id INTEGER,display TEXT DEFAULT '',position INTEGER DEFAULT 0,last_messages TEXT DEFAULT '[]',error TEXT DEFAULT '');CREATE TABLE list_ads(id INTEGER PRIMARY KEY,title TEXT NOT NULL,url TEXT NOT NULL DEFAULT '',slot_row INTEGER NOT NULL DEFAULT 0,slot_col INTEGER NOT NULL DEFAULT 0,style TEXT NOT NULL DEFAULT '',updated INTEGER NOT NULL);CREATE TABLE list_rounds(id TEXT PRIMARY KEY, created INTEGER, content TEXT, status TEXT);CREATE TABLE list_deliveries(id TEXT PRIMARY KEY, round TEXT, chat INTEGER, status TEXT, page INTEGER, messages TEXT, attempts INTEGER, available INTEGER, error TEXT);`);calls=[];sent=0;member='administrator';memberCount=100;countError=false;});
-const {DEFAULTS}=await import('../tgcloud/lib/domain.js');const {register,submit}=await import('../tgcloud/lib/registration.js');const {default:updateChat}=await import('../tgcloud/endpoints/updateChat.js');const {default:saveAds}=await import('../tgcloud/endpoints/saveAds.js');const {default:removeNow}=await import('../tgcloud/endpoints/removeNow.js');const {removeLists,processQueue}=await import('../tgcloud/lib/dispatch.js');const {default:approveUserChats}=await import('../tgcloud/endpoints/approveUserChats.js');const {default:removeChat}=await import('../tgcloud/endpoints/removeChat.js');const {default:banUser}=await import('../tgcloud/endpoints/banUser.js');
+const {DEFAULTS,CATEGORIES}=await import('../tgcloud/lib/domain.js');const {register,submit,keyboard,menu}=await import('../tgcloud/lib/registration.js');const {default:myChatMember}=await import('../tgcloud/handlers/my_chat_member.js');const {default:updateChat}=await import('../tgcloud/endpoints/updateChat.js');const {default:saveAds}=await import('../tgcloud/endpoints/saveAds.js');const {default:removeNow}=await import('../tgcloud/endpoints/removeNow.js');const {removeLists,processQueue}=await import('../tgcloud/lib/dispatch.js');const {default:approveUserChats}=await import('../tgcloud/endpoints/approveUserChats.js');const {default:removeChat}=await import('../tgcloud/endpoints/removeChat.js');const {default:banUser}=await import('../tgcloud/endpoints/banUser.js');
 function minimum(n,approval='manual'){sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify({...DEFAULTS,minMembers:n,approval}));}
 const pm=text=>({text,chat:{id:42,type:'private'},from:{id:42}});
 function seed(){sql.prepare("INSERT INTO list_chats(id,title,type,url,owner,updated) VALUES(-100123,'Canal teste','channel','https://t.me/canalteste',42,1)").run();}
@@ -14,16 +14,20 @@ test('/start responde no fim da conversa e remove o menu anterior',async()=>{awa
 test('novo menu /start, perfil e horários com botões e formatação HTML',async()=>{
  await message(pm('/start'));
  const startMsg=calls.find(x=>x.name==='sendMessage').p;
- assert.match(startMsg.text,/👋 Oiê/);
- assert.match(startMsg.text,/Junte-se à nossa Lista/);
- assert.match(startMsg.text,/Caso tenha dúvidas/);
+ assert.match(startMsg.text,/👋 Olá/);
+ assert.match(startMsg.text,/Pronto para impulsionar/);
+ assert.match(startMsg.text,/Suporte/);
  const startButtons=startMsg.reply_markup.inline_keyboard;
- assert.deepEqual(startButtons.slice(0,3).map(r=>r.map(b=>b.text)),[['👤 Meu Perfil','🔍 Pesquisar'],['⏰ Horários'],['❓ Ajuda','💬 Suporte']]);
+ assert.deepEqual(startButtons.slice(0,3).map(r=>r.map(b=>b.text)),[['👤 Meu Perfil','⏰ Horários'],['Adicionar ao canal/grupo'],['❓ Ajuda','💬 Suporte']]);
+ assert.equal(startButtons[1][0].style, 'success');
+ assert.match(startButtons[1][0].url, /startgroup=true/);
+ assert.match(startButtons[1][0].url, /admin=post_messages/);
+ assert.equal(startButtons.flat().some(b => b.text.includes('Pesquisar')), false);
 
  await callback(cb('nav:profile'));
  const profileMsg=calls.filter(x=>x.name==='editMessageText').at(-1).p;
- assert.match(profileMsg.text,/👽.*Meu Perfil.*Grupos.*Canais/);
- assert.match(profileMsg.text,/Meus Registros\s+┣ 📢 Canais • 0\s+┗ 💬 Grupos • 0/);
+ assert.match(profileMsg.text,/👤.*Meu Perfil.*Canais.*Grupos/);
+ assert.match(profileMsg.text,/Estatísticas da Conta\s+┣ 📢 Canais • 0\s+┗ 💬 Grupos • 0/);
  assert.match(profileMsg.text,/📅 Registro • \d{2}\/\d{2}\/\d{4}/);
  assert.deepEqual(profileMsg.reply_markup.inline_keyboard.map(r=>r.map(b=>b.text)),[['📢 Canais','💬 Grupos'],['🏠 Início']]);
 
@@ -36,9 +40,9 @@ test('novo menu /start, perfil e horários com botões e formatação HTML',asyn
 
  await callback(cb('nav:home'));
  const homeMsg=calls.filter(x=>x.name==='editMessageText').at(-1).p;
- assert.match(homeMsg.text,/👋 Oiê/);
+ assert.match(homeMsg.text,/👋 Olá/);
 });
-test('/configurar e /link no privado respondem sem ID',async()=>{await message(pm('/configurar'));await message(pm('/link'));assert.equal(sent,2);assert.match(calls.find(x=>x.name==='sendMessage').p.text,/Meus canais/);assert.match(calls.filter(x=>x.name==='sendMessage').at(-1).p.text,/Links dos seus/);});
+test('/configurar e /link no privado respondem sem ID',async()=>{await message(pm('/configurar'));await message(pm('/link'));assert.equal(sent,2);assert.match(calls.find(x=>x.name==='sendMessage').p.text,/Minhas Comunidades/);assert.match(calls.filter(x=>x.name==='sendMessage').at(-1).p.text,/Links Oficiais/);});
 test('navegação privada usa callbacks e edição',async()=>{await message(pm('/start'));await callback(cb('nav:help'));await callback(cb('nav:home'));assert.equal(sent,1);assert.equal(calls.filter(x=>x.name==='editMessageText').length,2);});
 test('categoria, resumo e link ficam na mesma mensagem do canal, apagada após o envio',async()=>{seed();await message({text:'/configurar',chat:{id:-100123,type:'channel',title:'Canal teste'},from:{id:42}});await callback(cb('cat:-100123:3',-100123));await callback(cb('cfg:-100123',-100123));assert.equal(sent,1);assert.equal(calls.filter(x=>x.name==='editMessageText').length,2);await callback(cb('submit:-100123',-100123));assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'pending');assert.equal(calls.filter(x=>x.name==='editMessageText').length,2,'o menu apagado não deve ser editado');assert.equal(calls.filter(x=>x.name==='sendMessage').length,1,'nenhuma mensagem nova no canal');assert.ok(calls.some(x=>x.name==='deleteMessage'&&x.p.chat_id===-100123&&x.p.message_id===1));const row=sql.prepare('SELECT menu_chat,menu_id FROM list_chats').get();assert.equal(row.menu_chat,0);assert.equal(row.menu_id,0);assert.equal(sql.prepare("SELECT value FROM list_runtime WHERE id='config_menu:-100123:-100123'").get()?.value,'null');});
 
@@ -137,11 +141,12 @@ test('setup inicial de canal/grupo e boas-vindas usam texto designer, blockquote
  assert.match(setupMsg.text,/<blockquote><b>📢 Painel do <a href="tg:\/\/user\?id=999">Canal<\/a>/);
  assert.match(setupMsg.text,/┣ 📊 Status • 📝 Cadastro em configuração/);
  assert.match(setupMsg.text,/┗ 🔗 Link •/);
- assert.match(setupMsg.text,/<b><i>✨ Defina a categoria e o link/);
+ assert.match(setupMsg.text,/<b><i>✨ Defina a categoria abaixo/);
  const setupButtons=setupMsg.reply_markup.inline_keyboard;
  assert.ok(setupButtons.some(r=>r.some(b=>b.text==='🏷 Escolher categoria')));
- assert.ok(setupButtons.some(r=>r.some(b=>b.text==='🔗 Editar link')));
- assert.ok(setupButtons.some(r=>r.some(b=>b.text==='✅ Enviar cadastro')));
+ assert.equal(setupButtons.some(r=>r.some(b=>b.text==='🔗 Editar link')), false);
+ assert.ok(setupButtons.some(r=>r.some(b=>b.text==='✅ Enviar cadastro' && b.style==='success')));
+ assert.ok(setupButtons.some(r=>r.some(b=>b.text==='❌ Cancelar' && b.style==='danger')));
 });
 
 test('aprovar e desaprovar: permite alternar situação do canal',async()=>{
@@ -205,7 +210,7 @@ test('banir e desbanir usuário: suspende cadastros e bloqueia mensagens privada
  calls=[];
  await message(pm('/start'));
  const okMsg=calls.find(x=>x.name==='sendMessage').p;
- assert.match(okMsg.text,/👋 Oiê/);
+ assert.match(okMsg.text,/👋 Olá/);
 });
 
 test('comandos /setadmin, /deladmin e /admins gerenciam administradores com sucesso',async()=>{
@@ -280,4 +285,67 @@ test('comandos /setadmin, /deladmin e /admins gerenciam administradores com suce
  const settingsAfter = JSON.parse(rowAfter.value);
  assert.equal(settingsAfter.admins.includes(123456789), false);
 });
+
+test('novas categorias, layout 2 por linha e botões de cancelar no canal', async () => {
+ assert.equal(CATEGORIES.length, 12);
+ assert.equal(CATEGORIES[0], '🎮 Jogos');
+ assert.equal(CATEGORIES[1], '📚 Estudos');
+ assert.equal(CATEGORIES[11], '📰 Notícias');
+
+ const c = { id: -100123, title: 'Meu Canal', type: 'channel', category: 0, status: 'draft', url: 'https://t.me/meucanal' };
+ const kb = keyboard(c, -100123).inline_keyboard;
+ assert.equal(kb.length, 8);
+ for (let i = 0; i < 6; i++) {
+  assert.equal(kb[i].length, 2);
+ }
+ assert.deepEqual(kb[6].map(b => b.text), ['✅ Enviar cadastro']);
+ assert.equal(kb[6][0].style, 'success');
+ assert.deepEqual(kb[7].map(b => b.text), ['‹ Voltar', '❌ Cancelar']);
+ assert.equal(kb[7][0].style, 'primary');
+ assert.equal(kb[7][1].style, 'danger');
+ // Categoria 0 selecionada fica verde (success) e sem o ícone ✓
+ assert.equal(kb[0][0].text, '🎮 Jogos');
+ assert.equal(kb[0][0].style, 'success');
+ // Categorias não selecionadas ficam azuis (primary)
+ assert.equal(kb[0][1].text, '📚 Estudos');
+ assert.equal(kb[0][1].style, 'primary');
+ // Verifica que em todo o teclado de categorias só há 1 botão cancelar
+ assert.equal(kb.flat().filter(b => b.text === '❌ Cancelar').length, 1);
+
+ seed();
+ calls = [];
+ await menu(c, -100123);
+ const sentMsg = calls.find(x => x.name === 'sendMessage').p;
+ const menuRows = sentMsg.reply_markup.inline_keyboard;
+ assert.equal(menuRows.flat().some(b => b.text?.includes('Continuar no privado')), false);
+ assert.equal(menuRows.flat().some(b => b.text?.includes('Editar link')), false);
+ assert.equal(menuRows.flat().filter(b => b.text === '❌ Cancelar').length, 1);
+ assert.ok(menuRows.flat().some(b => b.text === '❌ Cancelar' && b.style === 'danger'));
+});
+
+test('botão cancelar no canal/grupo fecha menu e remove mensagem', async () => {
+ seed();
+ calls = [];
+ await callback(cb('cancel:-100123', -100123));
+ assert.ok(calls.some(x => x.name === 'answerCallbackQuery'));
+ assert.ok(calls.some(x => x.name === 'deleteMessage' && x.p.chat_id === -100123));
+ const exitMsg = calls.find(x => x.name === 'sendMessage' && x.p.chat_id === -100123)?.p;
+ assert.match(exitMsg.text, /⚠️ Cadastro cancelado/);
+ assert.match(exitMsg.text, /O <b>ListaMyBOT<\/b> está saindo do canal\.\.\./);
+ assert.ok(calls.some(x => x.name === 'leaveChat' && x.p.chat_id === -100123));
+});
+
+test('bot adicionado como membro (não admin) avisa e sai do canal/grupo', async () => {
+ calls = [];
+ await myChatMember({
+  chat: { id: -100123, type: 'channel', title: 'Canal Teste' },
+  from: { id: 42 },
+  new_chat_member: { status: 'member' }
+ });
+ const warnMsg = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(warnMsg.text, /⚠️ Este canal precisa que o bot seja administrador/);
+ assert.match(warnMsg.text, /O <b>ListaMyBOT<\/b> requer permissões de administrador para operar\. Saindo\.\.\./);
+ assert.ok(calls.some(x => x.name === 'leaveChat' && x.p.chat_id === -100123));
+});
+
 

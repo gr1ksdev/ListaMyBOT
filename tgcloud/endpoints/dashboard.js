@@ -1,9 +1,9 @@
-import { db } from 'sdk';
+import { db, api } from 'sdk';
 import { requireAdmin, state } from '../lib/store.js';
 import { CATEGORIES } from '../lib/domain.js';
 export default async function(input,ctx){
  const auth=await requireAdmin(ctx);
- const [chats,rounds,deliveries,schedulerHeartbeat,memberRows,adRows,lastRemovalSummary,userNameRows]=await Promise.all([
+ const [chats,rounds,deliveries,schedulerHeartbeat,memberRows,adRows,lastRemovalSummary,userNameRows,me]=await Promise.all([
  db.all('SELECT * FROM list_chats ORDER BY updated DESC'),
  db.all('SELECT id,created,status FROM list_rounds ORDER BY created DESC LIMIT 10'),
  db.all('SELECT * FROM list_deliveries ORDER BY round DESC LIMIT 200'),
@@ -11,7 +11,8 @@ export default async function(input,ctx){
  db.all("SELECT id,value FROM list_runtime WHERE id LIKE 'members:%'"),
  db.all('SELECT * FROM list_ads ORDER BY slot_row,slot_col,id'),
  state('lastRemovalSummary',null),
- db.all("SELECT id,value FROM list_runtime WHERE id LIKE 'user_name:%'")
+ db.all("SELECT id,value FROM list_runtime WHERE id LIKE 'user_name:%'"),
+ api.getMe().catch(()=>({id:0,username:'ListaMyBOT',first_name:'ListaMyBOT'}))
  ]);
  const countsById=new Map(memberRows.map(r=>[Number(r.id.slice(8)),JSON.parse(r.value)]));
  const userNames=new Map(userNameRows.map(r=>[Number(r.id.slice(10)),JSON.parse(r.value)]));
@@ -35,5 +36,5 @@ export default async function(input,ctx){
  lastDeliverySummary={total,sent:0,failed:0,uncertain:0,skipped:0,pending:0,sending:0};
  for(const row of counts)lastDeliverySummary[row.status]=row.n;
  }
- return {...auth,chats,rounds,deliveries,lastDeliverySummary,lastRemovalSummary,categories:CATEGORIES,schedulerHeartbeat,ads:adRows,bannedUsers};
+ return {...auth,bot:{id:me?.id||0,username:me?.username||'ListaMyBOT',name:me?.first_name||'ListaMyBOT'},chats,rounds,deliveries,lastDeliverySummary,lastRemovalSummary,categories:CATEGORIES,schedulerHeartbeat,ads:adRows,bannedUsers};
 }

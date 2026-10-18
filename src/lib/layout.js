@@ -72,7 +72,8 @@ export function resolveListAds(s, ads = [], seed = 0) {
   const cfg = s.listAdsConfig;
   const validAds = ads.filter((a) => a && a.title && a.url);
   if (!validAds.length) return { start: null, middle: null, end: null };
-  const adsById = new Map(validAds.map((a) => [a.id, a]));
+  const getAdKey = (a) => (a.id != null ? a.id : a.key);
+  const adsById = new Map(validAds.map((a) => [getAdKey(a), a]));
 
   const activeSlots = [];
   if (cfg.slots?.start?.enabled) activeSlots.push('start');
@@ -92,18 +93,26 @@ export function resolveListAds(s, ads = [], seed = 0) {
       const targetAd = (targetId && adsById.get(targetId)) || validAds[0];
       for (const slot of activeSlots) result[slot] = targetAd;
     } else {
-      if (cfg.slots?.start?.enabled) {
-        result.start = (cfg.slots.start.adId && adsById.get(cfg.slots.start.adId)) || validAds[0];
+      const usedIds = new Set();
+      for (const slot of activeSlots) {
+        const explicitId = cfg.slots?.[slot]?.adId;
+        if (explicitId && adsById.has(explicitId)) {
+          result[slot] = adsById.get(explicitId);
+          usedIds.add(explicitId);
+        }
       }
-      if (cfg.slots?.middle?.enabled) {
-        result.middle =
-          (cfg.slots.middle.adId && adsById.get(cfg.slots.middle.adId)) ||
-          validAds[1] ||
-          validAds[0];
-      }
-      if (cfg.slots?.end?.enabled) {
-        result.end =
-          (cfg.slots.end.adId && adsById.get(cfg.slots.end.adId)) || validAds[2] || validAds[0];
+      let fallbackIdx = 0;
+      for (const slot of activeSlots) {
+        if (!result[slot]) {
+          let candidate = validAds.find((a) => !usedIds.has(getAdKey(a)));
+          if (candidate) {
+            result[slot] = candidate;
+            usedIds.add(getAdKey(candidate));
+          } else {
+            result[slot] = validAds[fallbackIdx % validAds.length];
+            fallbackIdx++;
+          }
+        }
       }
     }
   } else if (cfg.mode === 'random') {

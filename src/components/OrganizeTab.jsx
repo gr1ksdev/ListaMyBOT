@@ -6,6 +6,8 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   ExternalLink,
   Megaphone,
   Check,
@@ -22,10 +24,19 @@ import { Badge } from './ui/Badge';
 import { Input } from './ui/Input';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/Dialog';
 import { ColorPicker } from './ui/ColorPicker';
+import { Checkbox } from './ui/Checkbox';
+import { Switch } from './ui/Switch';
 import { useToast } from './ui/Toast';
 import { callEndpoint, saveSettingsSafe, haptic } from '@/lib/telegram';
 import { layoutPattern, repeatRows, paginateRows, resolveListAds } from '@/lib/layout';
-import { resolveStyle } from '@/lib/utils';
+import { resolveStyle, cn } from '@/lib/utils';
+
+const STYLE_DOT_COLOR = {
+  '': 'bg-slate-400',
+  primary: 'bg-[#2481cc]',
+  success: 'bg-[#2ea043]',
+  danger: 'bg-[#e53935]',
+};
 
 export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   const { toast } = useToast();
@@ -34,6 +45,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   const [ads, setAds] = React.useState([]);
   const [removedAdIds, setRemovedAdIds] = React.useState(new Set());
   const [selectedTokenKey, setSelectedTokenKey] = React.useState(null);
+  const [expandedAdKeys, setExpandedAdKeys] = React.useState(() => new Set());
 
   // List Type & Final List Promotions
   const [listType, setListType] = React.useState('mixed'); // 'mixed' | 'simple'
@@ -66,6 +78,25 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
 
   const tokenSerialRef = React.useRef(200);
   const nextKey = () => ++tokenSerialRef.current;
+
+  const toggleExpandAd = (key) => {
+    haptic('light');
+    setExpandedAdKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleToggleExpandAll = () => {
+    haptic('light');
+    if (expandedAdKeys.size === ads.length) {
+      setExpandedAdKeys(new Set());
+    } else {
+      setExpandedAdKeys(new Set(ads.map((a) => a.key)));
+    }
+  };
 
   // Initialize draft from data.settings & data.ads
   React.useEffect(() => {
@@ -110,24 +141,9 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       }))
     );
 
-    // Place ads in their designated slots
-    for (const ad of initialAds) {
-      if (
-        ad.slot_row != null &&
-        ad.slot_row >= 0 &&
-        ad.slot_row < initialRows.length &&
-        ad.slot_col != null &&
-        ad.slot_col >= 0 &&
-        ad.slot_col < initialRows[ad.slot_row].length
-      ) {
-        initialRows[ad.slot_row][ad.slot_col] = {
-          key: nextKey(),
-          name: ad.title,
-          adKey: ad.key,
-        };
-      }
-    }
-
+    // InitialRows strictly represents the channel layout pattern (e.g. 2 -> 2, 1 -> 2 -> 1).
+    // Partnerships are managed independently via strategic slots and off-grid positions,
+    // preventing ads from repeating or vanishing when patterns cycle or paginate.
     if (!initialRows.length) initialRows.push([{ key: nextKey(), name: 'Canal Exemplo' }]);
     setRows(initialRows);
   }, [data]);
@@ -230,6 +246,52 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     setSelectedTokenKey(token.key);
   };
 
+  // Partner reordering
+  const handleMoveAd = (fromIdx, toIdx) => {
+    if (toIdx < 0 || toIdx >= ads.length) return;
+    haptic('light');
+    setAds((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  };
+
+  // Partner removal
+  const handleRemoveAd = (ad) => {
+    haptic('light');
+    const idVal = ad.id || ad.key;
+    if (ad.id) setRemovedAdIds((prev) => new Set([...prev, ad.id]));
+    setAds((prev) => prev.filter((a) => a.key !== ad.key));
+    setExpandedAdKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(ad.key);
+      return next;
+    });
+    // Safely replace any ad token in the grid with a standard channel token instead of deleting the cell
+    setRows((prev) =>
+      prev.map((row) =>
+        row.map((t) => (t.adKey === ad.key ? { key: nextKey(), name: 'Canal Exemplo' } : t))
+      )
+    );
+    setListAdsConfig((prev) => {
+      const updated = { ...prev };
+      if (updated.fixedAdId === idVal) updated.fixedAdId = null;
+      if (updated.randomPool) {
+        updated.randomPool = updated.randomPool.filter((x) => x !== idVal);
+      }
+      if (updated.slots) {
+        const s = { ...updated.slots };
+        if (s.start?.adId === idVal) s.start = { ...s.start, adId: null };
+        if (s.middle?.adId === idVal) s.middle = { ...s.middle, adId: null };
+        if (s.end?.adId === idVal) s.end = { ...s.end, adId: null };
+        updated.slots = s;
+      }
+      return updated;
+    });
+  };
+
   // Save List Settings and Ads
   const handleSave = async () => {
     if (!currentPattern.length) {
@@ -237,41 +299,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       return;
     }
 
-    const upsert = [];
-    const remove = [...removedAdIds];
-
-    // Find all placed tokens
-    const placedPositions = new Map();
-    const usedCoords = new Set();
-    for (let r = 0; r < rows.length; r++) {
-      for (let c = 0; c < rows[r].length; c++) {
-        const token = rows[r][c];
-        if (token?.adKey) {
-          placedPositions.set(token.adKey, { row: r, col: c });
-          usedCoords.add(`${r}_${c}`);
-        }
-      }
-    }
-
-    // Auto assign unique row/col within [0..19, 0..4] for non-grid ads
-    let autoR = 19;
-    let autoC = 4;
-    const getNextCoord = () => {
-      while (autoR >= 0) {
-        const k = `${autoR}_${autoC}`;
-        if (!usedCoords.has(k)) {
-          usedCoords.add(k);
-          return { row: autoR, col: autoC };
-        }
-        autoC--;
-        if (autoC < 0) {
-          autoC = 4;
-          autoR--;
-        }
-      }
-      return { row: 0, col: 0 };
-    };
-
+    // Validate ads before saving
     for (const ad of ads) {
       const title = (ad.title || '').trim();
       if (!title) {
@@ -282,14 +310,23 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         toast(`Informe um link do Telegram (https://t.me/…) para “${title}”.`, 'error');
         return;
       }
-      const pos = placedPositions.get(ad.key) || getNextCoord();
+    }
+
+    const upsert = [];
+    const remove = [...removedAdIds];
+
+    // Auto assign unique row/col within [16..19, 0..4] in sequential ascending order for partnerships.
+    // This isolates partnerships from the channel pattern grid (0..15), preventing repeating or
+    // vanishing bugs when patterns repeat or paginate, while strictly preserving partnership order.
+    for (let i = 0; i < ads.length; i++) {
+      const ad = ads[i];
       upsert.push({
         id: ad.id,
-        title,
-        url: ad.url.trim(),
+        title: (ad.title || '').trim(),
+        url: (ad.url || '').trim(),
         style: ad.style || '',
-        row: pos.row,
-        col: pos.col,
+        row: 16 + Math.floor(i / 5),
+        col: i % 5,
       });
     }
 
@@ -410,6 +447,24 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   } else {
     previewRows = repeatRows(activeItems, previewPattern, previewSlots);
   }
+
+  // Default action buttons at the end of the list
+  const botUsername = data?.bot?.username || 'ListaMyBOT';
+  const botAddUrl = `https://t.me/${botUsername}?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users`;
+  previewRows.push([
+    {
+      text: 'Add-me em C/G',
+      url: botAddUrl,
+      style: 'primary',
+      isPreviewAd: true,
+    },
+    {
+      text: 'Canal Oficial',
+      url: 'https://t.me/ChannelLogBM',
+      style: 'success',
+      isPreviewAd: true,
+    },
+  ]);
 
   const previewPages = paginateRows(previewRows, 40, 20);
   const currentPageRows = previewPages[previewPage] || [];
@@ -655,16 +710,13 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                 </div>
 
                 <div className="flex items-center gap-2.5 pt-5">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     id="group-cat"
                     checked={groupCategories}
-                    onChange={(e) => setGroupCategories(e.target.checked)}
-                    className="h-4 w-4 rounded border-white/20 bg-background text-primary focus:ring-primary cursor-pointer"
-                  />
-                  <label htmlFor="group-cat" className="text-xs text-foreground/90 cursor-pointer">
+                    onCheckedChange={setGroupCategories}
+                  >
                     Agrupar por categoria
-                  </label>
+                  </Checkbox>
                 </div>
               </div>
             </CardContent>
@@ -966,7 +1018,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[65vh] overflow-y-auto space-y-4 pr-1">
+        <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-0 -mr-1 overscroll-contain">
           {/* ATIVAÇÃO GERAL */}
           <div className="flex items-center justify-between p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
             <div className="space-y-0.5">
@@ -978,14 +1030,12 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                 Exibe botões patrocinados em linhas exclusivas no Início, Meio e Fim da lista.
               </p>
             </div>
-            <input
-              type="checkbox"
+            <Switch
+              id="strategic-ads-toggle"
               checked={listAdsConfig.enabled}
-              onChange={(e) => {
-                haptic('selection');
-                setListAdsConfig((prev) => ({ ...prev, enabled: e.target.checked }));
+              onChange={(checked) => {
+                setListAdsConfig((prev) => ({ ...prev, enabled: checked }));
               }}
-              className="h-5 w-5 rounded border-amber-500/40 text-amber-500 focus:ring-amber-500 cursor-pointer"
             />
           </div>
 
@@ -1226,15 +1276,14 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                         const idVal = a.id || a.key;
                         const isChecked = listAdsConfig.randomPool?.includes(idVal);
                         return (
-                          <label
+                          <div
                             key={a.key}
-                            className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white/5 cursor-pointer text-xs"
+                            className="flex items-center p-1.5 rounded-lg hover:bg-white/5 transition"
                           >
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              id={`pool-${a.key}`}
                               checked={isChecked}
-                              onChange={(e) => {
-                                const checked = e.target.checked;
+                              onCheckedChange={(checked) => {
                                 setListAdsConfig((prev) => {
                                   const current = prev.randomPool || [];
                                   const updated = checked
@@ -1243,10 +1292,11 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                                   return { ...prev, randomPool: updated };
                                 });
                               }}
-                              className="h-4 w-4 rounded border-white/20 bg-background text-primary focus:ring-primary cursor-pointer"
-                            />
-                            <span className="truncate">{a.title || 'Sem título'}</span>
-                          </label>
+                              className="w-full"
+                            >
+                              <span className="truncate">{a.title || 'Sem título'}</span>
+                            </Checkbox>
+                          </div>
                         );
                       })
                     )}
@@ -1261,13 +1311,22 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
             </div>
           )}
 
-          {/* LISTA DE PARCEIROS CADASTRADOS */}
+          {/* LISTA DE PARCEIROS CADASTRADOS (RETRACTABLE LIST VIEW) */}
           <div className="space-y-2.5 pt-1">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                 <Megaphone className="h-3.5 w-3.5 text-amber-400" />
                 Parceiros Cadastrados ({ads.length})
               </span>
+              {ads.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleToggleExpandAll}
+                  className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition cursor-pointer"
+                >
+                  {expandedAdKeys.size === ads.length ? 'Recolher todos' : 'Expandir todos'}
+                </button>
+              )}
             </div>
 
             {ads.length === 0 ? (
@@ -1275,95 +1334,145 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                 Nenhum parceiro cadastrado ainda.
               </p>
             ) : (
-              ads.map((ad, idx) => (
-                <div
-                  key={ad.key}
-                  className="rounded-xl border border-white/10 bg-background/50 p-3.5 space-y-2.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-amber-300">Parceiro #{idx + 1}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const idVal = ad.id || ad.key;
-                        if (ad.id) setRemovedAdIds((prev) => new Set([...prev, ad.id]));
-                        setAds((prev) => prev.filter((a) => a.key !== ad.key));
-                        setRows((prev) =>
-                          prev.map((row) => row.filter((t) => t.adKey !== ad.key))
-                        );
-                        setListAdsConfig((prev) => {
-                          const updated = { ...prev };
-                          if (updated.fixedAdId === idVal) updated.fixedAdId = null;
-                          if (updated.randomPool) {
-                            updated.randomPool = updated.randomPool.filter((x) => x !== idVal);
-                          }
-                          if (updated.slots) {
-                            const s = { ...updated.slots };
-                            if (s.start?.adId === idVal) s.start = { ...s.start, adId: null };
-                            if (s.middle?.adId === idVal) s.middle = { ...s.middle, adId: null };
-                            if (s.end?.adId === idVal) s.end = { ...s.end, adId: null };
-                            updated.slots = s;
-                          }
-                          return updated;
-                        });
-                      }}
-                      className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1"
+              ads.map((ad, idx) => {
+                const isExpanded = expandedAdKeys.has(ad.key);
+                const dotColor = STYLE_DOT_COLOR[ad.style || ''] || 'bg-slate-400';
+
+                return (
+                  <div
+                    key={ad.key}
+                    className={cn(
+                      "rounded-xl border transition-all duration-200",
+                      isExpanded
+                        ? "border-amber-500/30 bg-background/70 shadow-sm"
+                        : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.07]"
+                    )}
+                  >
+                    {/* Compact Retractable Header */}
+                    <div
+                      onClick={() => toggleExpandAd(ad.key)}
+                      className="flex items-center justify-between p-3 cursor-pointer select-none gap-2"
                     >
-                      <Trash2 className="h-3.5 w-3.5" /> Remover
-                    </button>
-                  </div>
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Badge
+                          variant="outline"
+                          className="border-amber-500/30 text-amber-300 text-[11px] font-bold shrink-0 px-1.5 py-0.5"
+                        >
+                          #{idx + 1}
+                        </Badge>
 
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-foreground/80">Título</label>
-                    <Input
-                      type="text"
-                      value={ad.title || ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setAds((prev) =>
-                          prev.map((a) => (a.key === ad.key ? { ...a, title: val } : a))
-                        );
-                        setRows((prev) =>
-                          prev.map((row) =>
-                            row.map((t) => (t.adKey === ad.key ? { ...t, name: val } : t))
-                          )
-                        );
-                      }}
-                      placeholder="Ex: Canal Parceiro"
-                      className="h-9 bg-white/5 border-white/10"
-                    />
-                  </div>
+                        <span className={cn("h-2.5 w-2.5 rounded-full shrink-0 shadow-sm ring-1 ring-white/20", dotColor)} />
 
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-foreground/80">Link</label>
-                    <Input
-                      type="url"
-                      value={ad.url || ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setAds((prev) =>
-                          prev.map((a) => (a.key === ad.key ? { ...a, url: val } : a))
-                        );
-                      }}
-                      placeholder="https://t.me/..."
-                      className="h-9 bg-white/5 border-white/10"
-                    />
-                  </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-foreground truncate">
+                            {ad.title || 'Sem título'}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+                            <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                            {ad.url || 'https://t.me/...'}
+                          </div>
+                        </div>
+                      </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-foreground/80">Cor</label>
-                    <ColorPicker
-                      value={ad.style || ''}
-                      onChange={(val) => {
-                        setAds((prev) =>
-                          prev.map((a) => (a.key === ad.key ? { ...a, style: val } : a))
-                        );
-                      }}
-                      inheritLabel="Padrão"
-                    />
+                      <div
+                        className="flex items-center gap-1 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => handleMoveAd(idx, idx - 1)}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition cursor-pointer"
+                          title="Mover para cima"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === ads.length - 1}
+                          onClick={() => handleMoveAd(idx, idx + 1)}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition cursor-pointer"
+                          title="Mover para baixo"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAd(ad)}
+                          className="p-1 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition cursor-pointer ml-0.5"
+                          title="Remover parceiro"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleExpandAd(ad.key)}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition cursor-pointer ml-0.5"
+                          title={isExpanded ? "Recolher detalhes" : "Expandir detalhes"}
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 transition-transform duration-200",
+                              isExpanded && "rotate-180 text-amber-400"
+                            )}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Retractable / Collapsible Form Details */}
+                    {isExpanded && (
+                      <div className="border-t border-white/10 p-3 pt-2.5 space-y-3 bg-black/10 rounded-b-xl animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-foreground/80">Título do Botão</label>
+                          <Input
+                            type="text"
+                            value={ad.title || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAds((prev) =>
+                                prev.map((a) => (a.key === ad.key ? { ...a, title: val } : a))
+                              );
+                            }}
+                            placeholder="Ex: Canal Parceiro"
+                            className="h-9 bg-white/5 border-white/10 text-xs"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-foreground/80">Link do Telegram</label>
+                          <Input
+                            type="url"
+                            value={ad.url || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAds((prev) =>
+                                prev.map((a) => (a.key === ad.key ? { ...a, url: val } : a))
+                              );
+                            }}
+                            placeholder="https://t.me/..."
+                            className="h-9 bg-white/5 border-white/10 text-xs"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-foreground/80">Cor do Botão</label>
+                          <ColorPicker
+                            value={ad.style || ''}
+                            onChange={(val) => {
+                              setAds((prev) =>
+                                prev.map((a) => (a.key === ad.key ? { ...a, style: val } : a))
+                              );
+                            }}
+                            inheritLabel="Padrão"
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
 
             <Button
@@ -1371,13 +1480,15 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               variant="outline"
               size="sm"
               onClick={() => {
+                const newKey = nextKey();
                 const newAd = {
-                  key: nextKey(),
+                  key: newKey,
                   title: `Novo Parceiro ${ads.length + 1}`,
                   url: 'https://t.me/',
                   style: 'primary',
                 };
                 setAds((prev) => [...prev, newAd]);
+                setExpandedAdKeys((prev) => new Set([...prev, newKey]));
               }}
               className="w-full border-dashed border-white/20 text-foreground/80 hover:border-amber-500/50"
             >
@@ -1387,8 +1498,12 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="primary" onClick={() => setAdsModalOpen(false)}>
+        <DialogFooter className="pt-3">
+          <Button
+            variant="primary"
+            onClick={() => setAdsModalOpen(false)}
+            className="w-full sm:w-auto font-semibold"
+          >
             Pronto
           </Button>
         </DialogFooter>

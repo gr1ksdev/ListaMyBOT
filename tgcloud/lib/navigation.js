@@ -87,17 +87,20 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
   const rawName = fromUser?.first_name || await state(`user_name:${user}`, '') || 'Amigo';
   const nameLinked = tgLink(escHtml(rawName));
 
-  text = `👋 Oiê, ${nameLinked} !\n` +
-   `<b><i>😃 Junte-se à nossa Lista de ${tgLink('divulgação')} totalmente gratuita e conquiste ${tgLink('novos membros')}!</i></b>\n\n` +
-   `<blockquote>🚀 <b><i>Seja muito Bem-vindo! Conecte seus ${tgLink('Canais')} e ${tgLink('Grupos')} à maior rede de crescimento e impulsione sua audiência todos os dias!</i></b> ✨</blockquote>\n\n` +
-   `<b><i>❓ Caso tenha dúvidas, estou aqui no ${tgLink('Suporte')} para te ajudar! 🤝</i></b>`;
+  text = `👋 Olá, ${nameLinked}!\n` +
+   `<b><i>🚀 Pronto para impulsionar a sua comunidade para o próximo nível?</i></b>\n\n` +
+   `<blockquote>✨ <b><i>Seja muito Bem-vindo! Conecte seus ${tgLink('Canais')} e ${tgLink('Grupos')} à maior rede de divulgação gratuita e conquiste membros reais todos os dias!</i></b> 📈</blockquote>\n\n` +
+   `<b><i>💡 Explore as opções abaixo para gerenciar seus espaços ou tirar dúvidas no ${tgLink('Suporte')}. 🤝</i></b>`;
+
+  const botUsername = me.username || 'ListaMyBOT';
+  const botAddUrl = `https://t.me/${botUsername}?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users`;
 
   rows.push([
    { text: '👤 Meu Perfil', callback_data: 'nav:profile' },
-   { text: '🔍 Pesquisar', callback_data: 'nav:search' }
+   { text: '⏰ Horários', callback_data: 'nav:schedule' }
   ]);
   rows.push([
-   { text: '⏰ Horários', callback_data: 'nav:schedule' }
+   { text: 'Adicionar ao canal/grupo', url: botAddUrl, style: 'success' }
   ]);
   rows.push([
    { text: '❓ Ajuda', callback_data: 'nav:help' },
@@ -122,13 +125,13 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
   const groupsCount = list.filter(c => c.type === 'group' || c.type === 'supergroup').length;
   const regDate = await getUserRegDate(user);
 
-  text = `👽 ${tgLink('Meu Perfil')} • <b><i>Aqui você tem acesso às suas informações, bem como aos seus ${tgLink('Grupos')} e ${tgLink('Canais')}</i></b>.\n\n` +
-   `<blockquote><b>👤 Meus Registros\n` +
+  text = `👤 ${tgLink('Meu Perfil')} • <b><i>Visão Geral dos seus ${tgLink('Canais')} e ${tgLink('Grupos')}</i></b>\n\n` +
+   `<blockquote><b>📊 Estatísticas da Conta\n` +
    ` ┣ 📢 Canais • ${channelsCount}\n` +
    ` ┗ 💬 Grupos • ${groupsCount}\n` +
    `📅 Registro • ${regDate}\n` +
    `</b></blockquote>\n\n` +
-   `<b><i>✨ Você pode usar os botões abaixo para gerenciar seus grupos e canais.</i></b>`;
+   `<b><i>🚀 Gerencie suas comunidades conectadas tocando nos botões abaixo:</i></b>`;
 
   rows.push([
    { text: '📢 Canais', callback_data: 'nav:channels' },
@@ -143,17 +146,18 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
   const remSch = settings.removalSchedule || { enabled: false, mode: 'fixed', times: ['06:00', '18:00'], minutes: 60 };
 
   const postText = sendSch.mode === 'interval'
-   ? `⭐️ Postagens a cada ${tgLink(sendSch.minutes + ' minutos')}.`
+   ? `⭐️ Disparos a cada ${tgLink(sendSch.minutes + ' minutos')}.`
    : `⭐️ Postagens às ${formatScheduleTimes(sendSch.times, tgLink, true)}.`;
 
   const remText = remSch.mode === 'interval'
-   ? `♻️ Remoções a cada ${tgLink(remSch.minutes + ' minutos')}.`
+   ? `♻️ Limpeza a cada ${tgLink(remSch.minutes + ' minutos')}.`
    : `♻️ Remoções às ${formatScheduleTimes(remSch.times, tgLink, false)}.`;
 
-  text = `<b><i>⏰ ${tgLink('Horários')} • A Lista é enviada e fixada nos Grupos e Canais cadastrados ${tgLink('todos os dias.')}</i></b>\n\n` +
+  text = `⏰ ${tgLink('Horários')} • <b><i>Grade de Programação da Lista enviada ${tgLink('todos os dias')}</i></b>\n\n` +
    `<blockquote><b><i>${postText}</i></b></blockquote>\n` +
    `<blockquote><b><i>${remText}</i></b></blockquote>\n\n` +
-   `<b><i>💡 Mantenha o bot sempre como administrador com permissões ativas para garantir sua presença na lista diária! Juntos no crescimento da sua comunidade! 🚀💪</i></b>`;
+   `<blockquote>📌 <b><i>A lista é disparada e fixada automaticamente em todos os Canais e Grupos parceiros.</i></b></blockquote>\n\n` +
+   `<b><i>💡 Mantenha o bot como administrador com permissões ativas para garantir sua presença diária na lista! Juntos crescemos mais! 🚀💪</i></b>`;
 
   rows.push([
    { text: '🏠 Início', callback_data: 'nav:home' }
@@ -167,18 +171,18 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
     if (['administrator', 'creator'].includes(m.status)) list.push(c);
    } catch {}
   }
-  text = `📢 ${tgLink('Meus Canais')} • <b><i>Gerenciamento de Canais</i></b>\n\n`;
+  text = `📢 ${tgLink('Meus Canais')} • <b><i>Central de Canais</i></b>\n\n`;
   if (!list.length) {
-   text += `<blockquote><b><i>Você ainda não possui nenhum canal cadastrado.</i></b></blockquote>\n\n` +
-    `<b><i>Adicione o bot como administrador no seu canal com permissão para postar, editar e apagar mensagens e toque no botão abaixo para cadastrar:</i></b>`;
+   text += `<blockquote><b><i>Você ainda não possui nenhum canal conectado.</i></b></blockquote>\n\n` +
+    `<b><i>Adicione o bot como administrador no seu canal com permissão para postar, editar e apagar mensagens e toque no botão abaixo para ativar:</i></b>`;
   } else {
-   text += `<blockquote><b><i>Toque em um canal para configurar link, categoria ou acompanhar o status:</i></b></blockquote>`;
+   text += `<blockquote><b><i>Selecione um canal abaixo para acompanhar o status, categoria ou configurações:</i></b></blockquote>`;
    for (const c of list) {
     const icon = c.status === 'approved' ? '✅ ' : c.status === 'pending' ? '⏳ ' : '⚙️ ';
     rows.push([{ text: icon + c.title.slice(0, 45), callback_data: `cfg:${c.id}` }]);
    }
   }
-  rows.push([{ text: '➕ Adicionar canal', url: `https://t.me/${me.username}?startchannel&admin=post_messages+edit_messages+delete_messages` }]);
+  rows.push([{ text: '➕ Conectar canal', url: `https://t.me/${me.username}?startchannel&admin=post_messages+edit_messages+delete_messages` }]);
   rows.push([
    { text: '👤 Meu Perfil', callback_data: 'nav:profile' },
    { text: '🏠 Início', callback_data: 'nav:home' }
@@ -192,41 +196,41 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
     if (['administrator', 'creator'].includes(m.status)) list.push(c);
    } catch {}
   }
-  text = `💬 ${tgLink('Meus Grupos')} • <b><i>Gerenciamento de Grupos</i></b>\n\n`;
+  text = `💬 ${tgLink('Meus Grupos')} • <b><i>Central de Grupos</i></b>\n\n`;
   if (!list.length) {
-   text += `<blockquote><b><i>Você ainda não possui nenhum grupo cadastrado.</i></b></blockquote>\n\n` +
-    `<b><i>Adicione o bot como administrador no seu grupo com permissão para fixar e apagar mensagens e toque no botão abaixo para cadastrar:</i></b>`;
+   text += `<blockquote><b><i>Você ainda não possui nenhum grupo conectado.</i></b></blockquote>\n\n` +
+    `<b><i>Adicione o bot como administrador no seu grupo com permissão para fixar e apagar mensagens e toque no botão abaixo para ativar:</i></b>`;
   } else {
-   text += `<blockquote><b><i>Toque em um grupo para configurar link, categoria ou acompanhar o status:</i></b></blockquote>`;
+   text += `<blockquote><b><i>Selecione um grupo abaixo para acompanhar o status, categoria ou configurações:</i></b></blockquote>`;
    for (const c of list) {
     const icon = c.status === 'approved' ? '✅ ' : c.status === 'pending' ? '⏳ ' : '⚙️ ';
     rows.push([{ text: icon + c.title.slice(0, 45), callback_data: `cfg:${c.id}` }]);
    }
   }
-  rows.push([{ text: '➕ Adicionar grupo', url: `https://t.me/${me.username}?startgroup=participar&admin=delete_messages+pin_messages` }]);
+  rows.push([{ text: '➕ Conectar grupo', url: `https://t.me/${me.username}?startgroup=participar&admin=delete_messages+pin_messages` }]);
   rows.push([
    { text: '👤 Meu Perfil', callback_data: 'nav:profile' },
    { text: '🏠 Início', callback_data: 'nav:home' }
   ]);
  } else if (view === 'search') {
   await putState(`await_search:${user}`, true);
-  text = `🔍 ${tgLink('Pesquisar')} • <b><i>Encontre canais e grupos na lista</i></b>\n\n` +
-   `<blockquote><b><i>Envie aqui no chat o nome ou palavra-chave do canal ou grupo que deseja buscar.</i></b></blockquote>\n\n` +
-   `<b><i>Ou toque no botão abaixo para voltar ao início:</i></b>`;
+  text = `🔍 ${tgLink('Explorar Comunidades')} • <b><i>Busca Inteligente</i></b>\n\n` +
+   `<blockquote><b><i>Envie aqui no chat o nome, nicho ou palavra-chave da comunidade que procura.</i></b></blockquote>\n\n` +
+   `<b><i>Ou toque no botão abaixo para voltar ao menu principal:</i></b>`;
   rows.push([
    { text: '🏠 Início', callback_data: 'nav:home' }
   ]);
  } else if (view === 'help') {
-  text = `❓ ${tgLink('Ajuda')} • <b><i>Como Participar da Lista</i></b>\n\n` +
-   `<blockquote><b><i>1️⃣ Como Participar da Lista Diária:\n` +
+  text = `📚 ${tgLink('Central de Ajuda')} • <b><i>Como Impulsionar sua Audiência</i></b>\n\n` +
+   `<blockquote><b>🚀 1. Participação na Lista Diária:\n` +
    `• Adicione o bot como administrador no seu Canal ou Grupo.\n` +
-   `• Conceda as permissões necessárias e envie o cadastro no chat.\n` +
-   `• Seu canal/grupo participará das listas diárias de divulgação!</i></b></blockquote>\n\n` +
-   `<blockquote><b><i>2️⃣ Como Divulgar no Canal Exclusivo:\n` +
-   `• Envie a mídia (foto/vídeo/gif) ou texto com o modelo de ID, Nome, Descrição e #Tags.\n` +
-   `• Envie /divulgar para análise dos moderadores.\n` +
-   `• Ao ser aprovado, seu canal é publicado com destaque no canal oficial!</i></b></blockquote>\n\n` +
-   `<b><i>Toque no botão abaixo para ver o tutorial completo com modelo de cópia:</i></b>`;
+   `• Conceda as permissões requeridas e escolha a categoria.\n` +
+   `• Sua comunidade participará de todos os disparos diários automaticamente!</b></blockquote>\n\n` +
+   `<blockquote><b>💎 2. Divulgação em Destaque no Canal Oficial:\n` +
+   `• Monte seu anúncio com foto, vídeo, texto atraente e links.\n` +
+   `• Envie /divulgar para a nossa equipe de moderação avaliar.\n` +
+   `• Ao ser aprovado, seu anúncio será publicado no canal oficial com botões interativos!</b></blockquote>\n\n` +
+   `<b><i>Toque no botão abaixo para conferir o tutorial completo e modelo pronto:</i></b>`;
   rows.push([
    { text: '📢 Tutorial: Divulgar no Canal', callback_data: 'nav:divulgar' }
   ]);
@@ -238,33 +242,33 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
    { text: '🏠 Início', callback_data: 'nav:home' }
   ]);
  } else if (view === 'divulgar') {
-  text = `📢 ${tgLink('Divulgação no Canal')} • <b><i>Tutorial Passo a Passo</i></b>\n\n` +
-   `<blockquote><b><i>Esta funcionalidade permite divulgar seu Canal ou Grupo com destaque no nosso canal oficial de divulgações, com foto/vídeo, descrição e botões interativos!</i></b></blockquote>\n\n` +
-   `<b><i>📋 Passo a Passo para Enviar:</i></b>\n` +
-   `<blockquote><b><i>1. Copie o modelo abaixo e preencha com os dados do seu canal ou grupo:\n\n` +
+  text = `📢 ${tgLink('Divulgação VIP')} • <b><i>Publicação no Canal Oficial</i></b>\n\n` +
+   `<blockquote><b>✨ Destaque seu Canal ou Grupo para milhares de novos membros no nosso canal oficial de divulgação, com banner, descrição atraente e botões personalizados!</b></blockquote>\n\n` +
+   `<b>📋 Guia Rápido de Envio:</b>\n` +
+   `<blockquote><b>1️⃣ Preencha o modelo oficial:\n\n` +
    `🆔 -100xxxxxxxxxx\n` +
    `🌐 Nome do seu Canal/Grupo\n` +
-   `📝 Breve descrição sobre o canal\n` +
+   `📝 Breve descrição atrativa sobre a comunidade\n` +
    `📌 Categoria: #tags #tema\n` +
    `🔗 https://t.me/seulink\n\n` +
-   `2. Envie aqui no privado (em texto puro ou como legenda de foto, vídeo ou gif).\n` +
-   `3. O bot salvará o rascunho. Envie o comando /divulgar para confirmar.\n` +
-   `4. A equipe avaliará no grupo de moderação. Ao ser aprovado, será publicado no canal oficial!</i></b></blockquote>\n\n` +
-   `<b><i>✨ Divulgue e alcance milhares de novos membros!</i></b>`;
+   `2️⃣ Envie aqui no privado (como texto ou legenda de foto/vídeo/gif).\n` +
+   `3️⃣ O bot salvará o rascunho. Envie o comando /divulgar para confirmar.\n` +
+   `4️⃣ Nossa equipe validará no grupo de moderação e publicará no canal oficial!</b></blockquote>\n\n` +
+   `<b><i>🚀 Alcance novos públicos e expanda sua comunidade de forma exponencial!</i></b>`;
   rows.push([
-   { text: '❓ Ajuda Geral', callback_data: 'nav:help' },
+   { text: '📚 Central de Ajuda', callback_data: 'nav:help' },
    { text: '💬 Suporte', callback_data: 'nav:support' }
   ]);
   rows.push([
    { text: '🏠 Início', callback_data: 'nav:home' }
   ]);
  } else if (view === 'support') {
-  text = `🤝 ${tgLink('Suporte')} • <b><i>Central de Atendimento</i></b>\n\n` +
-   `<blockquote><b><i>❓ Precisa de suporte, tem dúvidas ou encontrou algum problema?\n` +
-   `Estamos aqui para te ajudar no que for preciso!</i></b></blockquote>\n\n` +
-   `<b><i>Toque no botão abaixo para conversar diretamente com o suporte:</i></b>`;
+  text = `💬 ${tgLink('Suporte & Atendimento')} • <b><i>Fale Conosco</i></b>\n\n` +
+   `<blockquote><b><i>Dúvidas sobre o funcionamento, parcerias ou auxílio na configuração do bot?\n` +
+   `Estamos à disposição para ajudar você a crescer!</i></b></blockquote>\n\n` +
+   `<b><i>Toque no botão abaixo para conversar em tempo real com nossa equipe:</i></b>`;
   rows.push([
-   { text: '💬 Falar com Suporte', url: `tg://user?id=${OWNER}` }
+   { text: '💬 Chamar no Suporte', url: `tg://user?id=${OWNER}` }
   ]);
   rows.push([
    { text: '🏠 Início', callback_data: 'nav:home' }
@@ -279,10 +283,10 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
    } catch {}
   }
   text = view === 'links'
-   ? `🔗 ${tgLink('Links dos seus canais e grupos')} • <b><i>Configuração de Links</i></b>\n\n<blockquote><b><i>Escolha qual link deseja consultar ou editar:</i></b></blockquote>`
-   : `📋 ${tgLink('Meus canais')} e grupos • <b><i>Painel de Cadastros</i></b>\n\n<blockquote><b><i>Escolha um cadastro para configurar ou acompanhar:</i></b></blockquote>`;
+   ? `🔗 ${tgLink('Links Oficiais')} • <b><i>Gerenciamento de Links</i></b>\n\n<blockquote><b><i>Selecione o canal ou grupo cujo link você deseja consultar ou atualizar:</i></b></blockquote>`
+   : `📋 ${tgLink('Minhas Comunidades')} • <b><i>Painel de Cadastros</i></b>\n\n<blockquote><b><i>Escolha uma comunidade para configurar ou acompanhar o status:</i></b></blockquote>`;
   if (!list.length) {
-   text += '\n\n<blockquote><b><i>Nenhum cadastro vinculado ainda. Adicione o bot como administrador no seu canal ou grupo e toque em Continuar no privado.</i></b></blockquote>';
+   text += '\n\n<blockquote><b><i>Nenhuma comunidade vinculada até o momento. Adicione o bot como administrador no seu canal ou grupo para começar!</i></b></blockquote>';
   }
   for (const c of list) {
    rows.push([{
