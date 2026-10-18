@@ -3,6 +3,7 @@ import { db, api } from 'sdk';
 import { CATEGORIES, permissionErrors } from './domain.js';
 import { config, getChat, state, putState, isBanned } from './store.js';
 import { screen, escHtml } from './navigation.js';
+import { sendChatSubmissionLog } from './chat_logs.js';
 export async function chatAdmin(chat,user){try{const m=await api.getChatMember({chat_id:chat,user_id:user});return ['creator','administrator'].includes(m.status);}catch{return false;}}
 export async function rights(chat){const me=await api.getMe();return permissionErrors(chat,await api.getChatMember({chat_id:chat.id,user_id:me.id}));}
 const STATUS = {
@@ -154,7 +155,7 @@ export async function closeMenu(c,target,messageId){
  await db.run('UPDATE list_chats SET menu_chat=0,menu_id=0 WHERE id=:id AND menu_chat=:t',{':id':c.id,':t':target});
  return true;
 }
-export async function submit(c,user){
+export async function submit(c,user,actorObj=null){
  if(user && await isBanned(user)) throw Error('Você está banido pelo administrador.');
  const {settings}=await config();const membership=await checkMembers(c,settings);if(!membership.ok)return 'rejected';
  if(c.category<0)throw Error('Selecione uma categoria primeiro.');
@@ -162,5 +163,13 @@ export async function submit(c,user){
  if(!c.url)throw Error('Este chat precisa de um link. Envie /link https://t.me/+CONVITE no próprio chat ou peça ao admin do bot para cadastrá-lo no painel.');
  const status=settings.approval==='automatic'?'approved':'pending';
  const result=await db.run("UPDATE list_chats SET status=:s,owner=:u,error='',updated=:n WHERE id=:id AND status IN ('draft','rejected','paused')",{':s':status,':u':user,':n':Date.now(),':id':c.id});
- return result.rowsAffected?status:c.status;
+ const finalStatus = result.rowsAffected?status:c.status;
+ if (finalStatus === 'pending') {
+  try {
+   await sendChatSubmissionLog({ ...c, status: finalStatus, owner: user }, actorObj || user);
+  } catch (e) {
+   console.warn('Erro ao enviar log de submissão do chat:', e);
+  }
+ }
+ return finalStatus;
 }

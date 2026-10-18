@@ -4,6 +4,7 @@ import { getChat, isAdmin, state, putState, isBanned, config } from '../lib/stor
 import { register, menu, chatAdmin } from '../lib/registration.js';
 import { screen, privateScreen, escHtml } from '../lib/navigation.js';
 import { parsePromoPayload, isPayloadLike, submitPromotion, ensurePromoTopic, promoTemplate, updatePromoConfig } from '../lib/promotions.js';
+import { ensureChatsTopic } from '../lib/chat_logs.js';
 // Explicit commands should answer at the bottom of the conversation. Inline
 // callbacks keep editing their current menu, without producing new messages.
 export default async function(m){
@@ -55,19 +56,33 @@ async function handleMessage(m){
    await api.sendMessage({ chat_id: m.chat.id, text: 'Envie o comando dentro do grupo de logs ou informe o ID: <code>/setlogs -100xxxxxxxxxx</code>', parse_mode: 'HTML' });
    return;
   }
-  await updatePromoConfig({ promoLogChat: targetId, promoLogTopic: 0 });
-  const topicRes = await ensurePromoTopic(targetId);
-  if (topicRes.ok && topicRes.topicId) {
-   await updatePromoConfig({ promoLogTopic: topicRes.topicId });
+  await updatePromoConfig({ promoLogChat: targetId, promoLogTopic: 0, chatsLogTopic: 0 });
+  const promoRes = await ensurePromoTopic(targetId);
+  const chatsRes = await ensureChatsTopic(targetId);
+  const updateObj = {};
+  const createdTopics = [];
+  if (promoRes.ok && promoRes.topicId) {
+   updateObj.promoLogTopic = promoRes.topicId;
+   createdTopics.push(`• Divulgações pendentes (ID: <code>${promoRes.topicId}</code>)`);
+  }
+  if (chatsRes.ok && chatsRes.topicId) {
+   updateObj.chatsLogTopic = chatsRes.topicId;
+   createdTopics.push(`• Cadastros pendentes (ID: <code>${chatsRes.topicId}</code>)`);
+  }
+  if (Object.keys(updateObj).length > 0) {
+   await updatePromoConfig(updateObj);
+  }
+
+  if (createdTopics.length > 0) {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: `✅ <b>Grupo de logs configurado com sucesso!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n📌 Tópico criado: <b>Divulgações pendentes</b> (ID: <code>${topicRes.topicId}</code>).\nTodas as solicitações de divulgação serão enviadas para este tópico.`,
+    text: `✅ <b>Grupo de logs configurado com sucesso!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n📌 <b>Tópicos criados:</b>\n${createdTopics.join('\n')}\n\nTodas as solicitações de divulgação e cadastros da lista serão enviadas para seus respectivos tópicos.`,
     parse_mode: 'HTML'
    });
   } else {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: `✅ <b>Grupo de logs configurado!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n<i>Aviso: ${escHtml(topicRes.error || 'O grupo não possui tópicos ativados.')} As divulgações serão enviadas no chat geral.</i>`,
+    text: `✅ <b>Grupo de logs configurado!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n<i>Aviso: ${escHtml(promoRes.error || chatsRes.error || 'O grupo não possui tópicos ativados.')} As mensagens serão enviadas no chat geral.</i>`,
     parse_mode: 'HTML'
    });
   }
@@ -96,9 +111,10 @@ async function handleMessage(m){
   const c = await config();
   await api.sendMessage({
    chat_id: m.chat.id,
-   text: `📊 <b>Status da Divulgação Exclusiva</b>\n\n` +
+   text: `📊 <b>Status dos Grupos & Divulgação</b>\n\n` +
          `• <b>Grupo de Logs:</b> <code>${c.settings.promoLogChat || 'Não configurado'}</code>\n` +
-         `• <b>Tópico de Logs:</b> <code>${c.settings.promoLogTopic || 'Nenhum (chat principal)'}</code>\n` +
+         `• <b>Tópico de Divulgações:</b> <code>${c.settings.promoLogTopic || 'Nenhum (chat principal)'}</code>\n` +
+         `• <b>Tópico de Cadastros:</b> <code>${c.settings.chatsLogTopic || 'Nenhum (chat principal)'}</code>\n` +
          `• <b>Canal Vinculado:</b> <code>${c.settings.promoChannel || 'Não vinculado'}</code>\n\n` +
          `<i>Use /setlogs no grupo de logs e /setcanal no canal de publicação.</i>`,
    parse_mode: 'HTML'

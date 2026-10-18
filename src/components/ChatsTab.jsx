@@ -26,7 +26,7 @@ import { useToast } from './ui/Toast';
 import { callEndpoint, haptic, openTelegramLink } from '@/lib/telegram';
 import { initials, LABELS, resolveStyle } from '@/lib/utils';
 
-export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo }) {
+export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initialChatId }) {
   const { toast } = useToast();
   const [filter, setFilter] = React.useState(initialFilter);
   const [search, setSearch] = React.useState('');
@@ -34,11 +34,32 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo }) {
   const [editingChat, setEditingChat] = React.useState(null);
   const [removingChat, setRemovingChat] = React.useState(null);
   const [savingAction, setSavingAction] = React.useState(false);
+  const [highlightedChatId, setHighlightedChatId] = React.useState(null);
 
   // Sync initialFilter prop if changed
   React.useEffect(() => {
     if (initialFilter) setFilter(initialFilter);
   }, [initialFilter]);
+
+  // Handle deep linking for initialChatId
+  React.useEffect(() => {
+    if (initialChatId != null && initialChatId !== '') {
+      const targetId = Number(initialChatId);
+      if (!Number.isNaN(targetId)) {
+        setFilter('all');
+        setExpandedIds((prev) => new Set([...prev, targetId]));
+        setHighlightedChatId(targetId);
+
+        const timer = setTimeout(() => {
+          const el = document.getElementById(`chat-card-${targetId}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 350);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [initialChatId, data?.chats?.length]);
 
   const chats = data?.chats || [];
   const settings = data?.settings || {};
@@ -312,11 +333,16 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo }) {
           const belowMinMembers =
             settings.minMembers > 0 && chat.members != null && chat.members < settings.minMembers;
 
+          const isTargetHighlight = highlightedChatId === chat.id;
+
           return (
             <div
               key={chat.id}
-              className={`rounded-2xl border transition-all duration-200 overflow-hidden ${
-                isExpanded
+              id={`chat-card-${chat.id}`}
+              className={`rounded-2xl border transition-all duration-300 overflow-hidden ${
+                isTargetHighlight
+                  ? 'border-primary ring-2 ring-primary/60 bg-card shadow-xl shadow-primary/10'
+                  : isExpanded
                   ? 'border-white/20 bg-card shadow-lg'
                   : 'border-white/10 bg-card/70 hover:border-white/20'
               }`}

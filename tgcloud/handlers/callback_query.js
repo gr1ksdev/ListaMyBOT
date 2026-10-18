@@ -3,12 +3,13 @@ import { api, db } from 'sdk';
 import { CATEGORIES } from '../lib/domain.js';
 import { getChat, putState, isAdmin, state } from '../lib/store.js';
 import { chatAdmin, menu, submit, register, closeMenu } from '../lib/registration.js';
-import { privateScreen } from '../lib/navigation.js';
+import { privateScreen, escHtml } from '../lib/navigation.js';
 import { submitPromotion, approvePromotion, rejectPromotion } from '../lib/promotions.js';
+import { formatChatSubmissionMessage, chatSubmissionKeyboard } from '../lib/chat_logs.js';
 export default async function(q){
  if(!q.message)return;
  const [action,raw,value]=String(q.data||'').split(':');const target=q.message.chat.id;const user=q.from.id;
- if(!['nav','cfg','cats','cat','link','submit','recheck','promo'].includes(action))return;
+ if(!['nav','cfg','cats','cat','link','submit','recheck','promo','chat_adm'].includes(action))return;
  let answered=false;const answer=async(text,alert=false)=>{if(!answered){await api.answerCallbackQuery({callback_query_id:q.id,...(text?{text,show_alert:alert}:{})});answered=true;}};
  try{
  if(action==='promo'){
@@ -38,6 +39,68 @@ export default async function(q){
   }
   return;
  }
+ if(action==='chat_adm'){
+  const isBotAdm=await isAdmin(user);
+  const isChatAdm=target<0?await chatAdmin(target,user):false;
+  if(!isBotAdm&&!isChatAdm){await answer('Apenas administradores do bot podem avaliar cadastros.',true);return;}
+  const chatId=Number(value);
+  if(!Number.isSafeInteger(chatId))return;
+  const c=await getChat(chatId);
+  if(!c){await answer('Cadastro não encontrado.',true);return;}
+  let memberCount=0;
+  try{memberCount=await api.getChatMemberCount({chat_id:chatId});}catch{}
+  if(raw==='approve'){
+   await answer('Aprovando cadastro...');
+   await db.run("UPDATE list_chats SET status='approved', error='', updated=:n WHERE id=:id",{':n':Date.now(),':id':chatId});
+   c.status='approved';
+   try{
+    await api.editMessageText({
+     chat_id:target,
+     message_id:q.message.message_id,
+     text:formatChatSubmissionMessage(c,memberCount,c.owner,'approved',q.from),
+     parse_mode:'HTML',
+     disable_web_page_preview:true,
+     reply_markup:chatSubmissionKeyboard(chatId,'approved')
+    });
+   }catch(e){console.warn('Erro ao atualizar mensagem de log:',e);}
+   if(c.owner){
+    try{
+     await api.sendMessage({
+      chat_id:c.owner,
+      text:`🎉 <b>Boas notícias!</b>\n\nSeu canal/grupo <b>${escHtml(c.title)}</b> foi aprovado e agora faz parte da nossa lista oficial!`,
+      parse_mode:'HTML'
+     });
+    }catch{}
+   }
+   return;
+  }
+  if(raw==='reject'){
+   await answer('Rejeitando cadastro...');
+   await db.run("UPDATE list_chats SET status='rejected', updated=:n WHERE id=:id",{':n':Date.now(),':id':chatId});
+   c.status='rejected';
+   try{
+    await api.editMessageText({
+     chat_id:target,
+     message_id:q.message.message_id,
+     text:formatChatSubmissionMessage(c,memberCount,c.owner,'rejected',q.from),
+     parse_mode:'HTML',
+     disable_web_page_preview:true,
+     reply_markup:chatSubmissionKeyboard(chatId,'rejected')
+    });
+   }catch(e){console.warn('Erro ao atualizar mensagem de log:',e);}
+   if(c.owner){
+    try{
+     await api.sendMessage({
+      chat_id:c.owner,
+      text:`⚠️ <b>Aviso sobre seu cadastro:</b>\n\nA solicitação de entrada de <b>${escHtml(c.title)}</b> na lista foi recusada pelos moderadores.`,
+      parse_mode:'HTML'
+     });
+    }catch{}
+   }
+   return;
+  }
+  return;
+ }
  if(action==='nav'){
   if(q.message.chat.type!=='private'||target!==user)return;
   await answer();
@@ -56,7 +119,7 @@ export default async function(q){
  const category=Number(value);if(!Number.isInteger(category)||!CATEGORIES[category])throw Error('Categoria inválida.');
  await db.run("UPDATE list_chats SET category=:c,updated=:n WHERE id=:id AND status NOT IN ('pending','approved')",{':c':category,':n':Date.now(),':id':id});c.category=category;await answer(CATEGORIES[category]);await menu(c,target,q.message,'categories');
  }else if(action==='submit'){
- c.status=await submit(c,user);await answer(c.status==='rejected'?'Cadastro rejeitado: membros abaixo do mínimo.':'Cadastro enviado!',c.status==='rejected');
+ c.status=await submit(c,user,q.from);await answer(c.status==='rejected'?'Cadastro rejeitado: membros abaixo do mínimo.':'Cadastro enviado!',c.status==='rejected');
  if(target<0&&['pending','approved'].includes(c.status)&&await closeMenu(c,target,q.message.message_id))return;
  await menu(c,target,q.message);
  }else{

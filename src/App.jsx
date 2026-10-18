@@ -20,6 +20,7 @@ function DashboardContent() {
   const [data, setData] = React.useState(null);
   const [isDemo, setIsDemo] = React.useState(false);
   const realDataBackup = React.useRef(null);
+  const [initialTargetChatId, setInitialTargetChatId] = React.useState(null);
 
   const loadData = React.useCallback(async (showToast = false) => {
     try {
@@ -47,6 +48,33 @@ function DashboardContent() {
   React.useEffect(() => {
     initTelegramApp();
     loadData();
+
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#\/?/, ''));
+      const tabParam = urlParams.get('tab') || hashParams.get('tab');
+      const chatParam = urlParams.get('chat') || hashParams.get('chat');
+
+      const tgStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+      let deepChatId = chatParam;
+      if (!deepChatId && tgStartParam) {
+        if (tgStartParam.startsWith('chat_')) {
+          deepChatId = tgStartParam.replace('chat_', '');
+        } else if (/^-?\d+$/.test(tgStartParam)) {
+          deepChatId = tgStartParam;
+        }
+      }
+
+      if (tabParam === 'chats' || deepChatId) {
+        setActiveTab('chats');
+        setChatFilter('all');
+      }
+      if (deepChatId) {
+        setInitialTargetChatId(deepChatId);
+      }
+    } catch (e) {
+      console.warn('Erro ao processar parâmetros da URL:', e);
+    }
   }, [loadData]);
 
   // Demo mode toggle
@@ -209,6 +237,7 @@ function DashboardContent() {
             initialFilter={chatFilter}
             onRefresh={() => loadData()}
             isDemo={isDemo}
+            initialChatId={initialTargetChatId}
           />
         )}
 

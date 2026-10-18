@@ -20,10 +20,20 @@ const sdk = {
         }
         if (name === 'getChatMember') {
           if (p.user_id === 99999) return { status: 'member' };
-          return { status: 'administrator', can_manage_topics: canManageTopics };
+          return {
+            status: 'administrator',
+            can_manage_topics: canManageTopics,
+            can_delete_messages: true,
+            can_pin_messages: true,
+            can_post_messages: true,
+            can_edit_messages: true
+          };
         }
         if (name === 'createForumTopic') {
-          return { message_thread_id: 888, name: p.name || 'Divulgações pendentes' };
+          return { message_thread_id: p.name?.includes('Cadastros') ? 777 : 888, name: p.name || 'Divulgações pendentes' };
+        }
+        if (name === 'getChatMemberCount') {
+          return 1250;
         }
         if (['sendMessage', 'sendPhoto', 'sendVideo', 'sendAnimation'].includes(name)) {
           return { message_id: ++sent };
@@ -52,6 +62,8 @@ registerHooks({
 });
 
 const { parsePromoPayload, ensurePromoTopic, submitPromotion, approvePromotion, rejectPromotion } = await import('../tgcloud/lib/promotions.js');
+const { ensureChatsTopic, formatChatSubmissionMessage, chatSubmissionKeyboard, sendChatSubmissionLog } = await import('../tgcloud/lib/chat_logs.js');
+const { submit } = await import('../tgcloud/lib/registration.js');
 const { DEFAULTS } = await import('../tgcloud/lib/domain.js');
 const { default: message } = await import('../tgcloud/handlers/message.js');
 const { default: callback } = await import('../tgcloud/handlers/callback_query.js');
@@ -335,3 +347,153 @@ test('não-admin não consegue aprovar nem desaprovar', async () => {
   const promoInDb = sql.prepare('SELECT * FROM list_promotions WHERE id=?').get(promo.id);
   assert.equal(promoInDb.status, 'pending');
 });
+
+test('verificação e criação do tópico de cadastros pendentes no grupo fórum', async () => {
+  const res = await ensureChatsTopic(-1001999999);
+  assert.equal(res.ok, true);
+  assert.equal(res.topicId, 777);
+  assert.equal(res.name, 'Cadastros pendentes');
+
+  // Caso onde o grupo não é fórum
+  isForum = false;
+  const noForumRes = await ensureChatsTopic(-1001999999);
+  assert.equal(noForumRes.ok, false);
+  assert.match(noForumRes.error, /não tem tópicos ativados/i);
+
+  // Caso onde o bot não tem permissão para gerenciar tópicos
+  isForum = true;
+  canManageTopics = false;
+  const noPermRes = await ensureChatsTopic(-1001999999);
+  assert.equal(noPermRes.ok, false);
+  assert.match(noPermRes.error, /Gerenciar tópicos/i);
+});
+
+test('envio de solicitação de cadastro para o tópico de logs com dados completos e botões', async () => {
+  sql.prepare('UPDATE list_settings SET value=? WHERE id=1').run(JSON.stringify({
+    ...DEFAULTS,
+    promoLogChat: -1001999999,
+    chatsLogTopic: 777
+  }));
+
+  const chat = {
+    id: -1001234567,
+    title: 'Canal Incrível',
+    type: 'channel',
+    url: 'https://t.me/canalincrivel',
+    category: 0,
+    owner: 42
+  };
+
+  const actor = { id: 42, first_name: 'Gabriel', username: 'gabriel_user' };
+  const sentMsg = await sendChatSubmissionLog(chat, actor);
+  assert.ok(sentMsg);
+
+  // Verifica mensagem enviada
+  const logCall = calls.find(c => c.name === 'sendMessage' && c.p.chat_id === -1001999999);
+  assert.ok(logCall);
+  assert.equal(logCall.p.message_thread_id, 777);
+  assert.match(logCall.p.text, /Nova Solicitação de Entrada na Lista/);
+  assert.match(logCall.p.text, /-1001234567/);
+  assert.match(logCall.p.text, /Canal Incrível/);
+  assert.match(logCall.p.text, /https:\/\/t\.me\/canalincrivel/);
+  assert.match(logCall.p.text, /1\.250/); // Membros formatados
+  assert.match(logCall.p.text, /Gabriel/);
+  assert.match(logCall.p.text, /42/);
+
+  // Verifica botões
+  const kb = logCall.p.reply_markup.inline_keyboard;
+  assert.equal(kb.length, 2);
+  // Linha 1: Aprovar e Rejeitar com estilos
+  assert.equal(kb[0][0].text, '✅ Aprovar');
+  assert.equal(kb[0][0].callback_data, 'chat_adm:approve:-1001234567');
+  assert.equal(kb[0][0].style, 'success');
+
+  assert.equal(kb[0][1].text, '❌ Rejeitar');
+  assert.equal(kb[0][1].callback_data, 'chat_adm:reject:-1001234567');
+  assert.equal(kb[0][1].style, 'danger');
+
+  // Linha 2: Abrir no Painel
+  assert.equal(kb[1][0].text, '📊 Abrir no Painel');
+  assert.match(kb[1][0].url, /\?tab=chats&chat=-1001234567/);
+});
+
+test('callback de aprovação e rejeição de cadastros pelos administradores', async () => {
+  sql.prepare('UPDATE list_settings SET value=? WHERE id=1').run(JSON.stringify({
+    ...DEFAULTS,
+    promoLogChat: -1001999999,
+    chatsLogTopic: 777
+  }));
+
+  sql.prepare(`
+    INSERT INTO list_chats(id, title, type, url, category, status, owner, updated)
+    VALUES(-1001234567, 'Canal Incrível', 'channel', 'https://t.me/canalincrivel', 0, 'pending', 42, ?)
+  `).run(Date.now());
+
+  // Não-admin tenta aprovar
+  await callback(cbQuery('chat_adm:approve:-1001234567', 99999));
+  assert.ok(calls.some(c => c.name === 'answerCallbackQuery' && c.p.text.includes('Apenas administradores')));
+  let chatInDb = sql.prepare('SELECT status FROM list_chats WHERE id=-1001234567').get();
+  assert.equal(chatInDb.status, 'pending');
+
+  // Admin aprova
+  calls = [];
+  await callback(cbQuery('chat_adm:approve:-1001234567', 7595607953));
+  chatInDb = sql.prepare('SELECT status FROM list_chats WHERE id=-1001234567').get();
+  assert.equal(chatInDb.status, 'approved');
+
+  // Mensagem de log é editada
+  const editCall = calls.find(c => c.name === 'editMessageText');
+  assert.ok(editCall);
+  assert.match(editCall.p.text, /Solicitação APROVADA na Lista/);
+  assert.match(editCall.p.text, /Aprovado por:/);
+
+  // Dono é notificado no privado
+  const notifyOwner = calls.find(c => c.name === 'sendMessage' && c.p.chat_id === 42);
+  assert.ok(notifyOwner);
+  assert.match(notifyOwner.p.text, /Boas notícias!/);
+  assert.match(notifyOwner.p.text, /Canal Incrível/);
+
+  // Admin altera para rejeitado
+  calls = [];
+  await callback(cbQuery('chat_adm:reject:-1001234567', 7595607953));
+  chatInDb = sql.prepare('SELECT status FROM list_chats WHERE id=-1001234567').get();
+  assert.equal(chatInDb.status, 'rejected');
+
+  const rejectEdit = calls.find(c => c.name === 'editMessageText');
+  assert.ok(rejectEdit);
+  assert.match(rejectEdit.p.text, /Solicitação REJEITADA na Lista/);
+  assert.match(rejectEdit.p.text, /Rejeitado por:/);
+
+  // Dono notificado da rejeição
+  const notifyReject = calls.find(c => c.name === 'sendMessage' && c.p.chat_id === 42);
+  assert.ok(notifyReject);
+  assert.match(notifyReject.p.text, /Aviso sobre seu cadastro/);
+});
+
+test('submissão no fluxo de registro envia log automaticamente para o tópico', async () => {
+  sql.prepare('UPDATE list_settings SET value=? WHERE id=1').run(JSON.stringify({
+    ...DEFAULTS,
+    approval: 'manual',
+    promoLogChat: -1001999999,
+    chatsLogTopic: 777
+  }));
+
+  sql.prepare(`
+    INSERT INTO list_chats(id, title, type, url, category, status, owner, updated)
+    VALUES(-100999888, 'Grupo Novo', 'group', 'https://t.me/gruponovo', 1, 'draft', 42, ?)
+  `).run(Date.now());
+
+  calls = [];
+  const c = sql.prepare('SELECT * FROM list_chats WHERE id=-100999888').get();
+  const actor = { id: 42, first_name: 'Gabriel', username: 'gabriel_user' };
+  const finalStatus = await submit(c, 42, actor);
+
+  assert.equal(finalStatus, 'pending');
+  // Verifica se sendChatSubmissionLog foi executado
+  const logMsg = calls.find(call => call.name === 'sendMessage' && call.p.chat_id === -1001999999);
+  assert.ok(logMsg);
+  assert.equal(logMsg.p.message_thread_id, 777);
+  assert.match(logMsg.p.text, /Grupo Novo/);
+  assert.match(logMsg.p.text, /Gabriel/);
+});
+

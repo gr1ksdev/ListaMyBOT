@@ -6,7 +6,7 @@ export function isOwner(id) {
 }
 export const APP_URL = 'https://app8718726006.tgcloud.ai/';
 export const CATEGORIES = ['🌏 PADRÃO','🔞 Adulto +18','👫 Amizades','🏛 Apostas','😂 Comédia e Humor','🚩 Cursos','📍 Entretenimento','🎬 Filmes e Séries','💸 Investimentos','📚 Livros','🎵 Músicas','📰 Notícias'];
-export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'' };
+export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0 };
 export function validateSettings(input, now=Date.now()) {
  const s=JSON.parse(JSON.stringify(input));
  s.minMembers=s.minMembers??0;
@@ -48,6 +48,7 @@ export function validateSettings(input, now=Date.now()) {
  rem.times=[...new Set(rem.times)].sort(); rem.nextAt=nextTime(rem,now);
  s.promoLogChat = Number.isSafeInteger(s.promoLogChat) ? s.promoLogChat : 0;
  s.promoLogTopic = Number.isSafeInteger(s.promoLogTopic) ? s.promoLogTopic : 0;
+ s.chatsLogTopic = Number.isSafeInteger(s.chatsLogTopic) ? s.chatsLogTopic : 0;
  s.promoChannel = typeof s.promoChannel === 'string' ? s.promoChannel : (Number.isSafeInteger(s.promoChannel) ? String(s.promoChannel) : '');
  return s;
 }
