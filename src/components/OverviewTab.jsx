@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Sparkles,
   ShieldCheck,
+  BookOpen,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
@@ -26,6 +27,7 @@ export function OverviewTab({ data, onNavigateTab, onRefresh, isDemo }) {
   const [sending, setSending] = React.useState(false);
   const [removing, setRemoving] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
+  const [promoTutorialOpen, setPromoTutorialOpen] = React.useState(false);
 
   const approvedChats = (data?.chats || []).filter((c) => c.status === 'approved');
   const pendingChats = (data?.chats || []).filter((c) => c.status === 'pending');
@@ -318,6 +320,36 @@ export function OverviewTab({ data, onNavigateTab, onRefresh, isDemo }) {
         </Card>
       </div>
 
+      {/* Promo Spotlight Banner / Tutorial */}
+      <div className="rounded-2xl border border-primary/30 bg-primary/10 p-3.5 shadow-sm flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-md">
+            <Radio className="h-4 w-4" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+              Divulgações no Canal &amp; Grupo de Logs
+              <span className="rounded-full bg-primary/20 px-1.5 py-0.5 text-[9px] font-semibold text-primary">Novo</span>
+            </h4>
+            <p className="text-[11px] text-muted-foreground">
+              Divulgação avulsa com mídia, moderação no grupo e post interativo.
+            </p>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            haptic('selection');
+            setPromoTutorialOpen(true);
+          }}
+          className="shrink-0 text-xs font-semibold h-8 border-primary/30 text-primary hover:bg-primary/20"
+        >
+          <BookOpen className="h-3.5 w-3.5 mr-1" />
+          Como Usar
+        </Button>
+      </div>
+
       {/* Confirmation Dialog: Send */}
       <Dialog open={confirmSendOpen} onOpenChange={setConfirmSendOpen}>
         <DialogHeader>
@@ -352,6 +384,65 @@ export function OverviewTab({ data, onNavigateTab, onRefresh, isDemo }) {
           <Button variant="destructive" onClick={handleRemoveNow} disabled={removing}>
             <Trash2 className="h-4 w-4" />
             {removing ? 'Excluindo...' : 'Confirmar Exclusão'}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Tutorial Dialog: Standalone Promotions */}
+      <Dialog open={promoTutorialOpen} onOpenChange={setPromoTutorialOpen}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Radio className="h-4 w-4 text-primary" />
+            Divulgações Exclusivas no Canal
+          </DialogTitle>
+          <DialogDescription>
+            Tutorial de configuração e uso da nova ferramenta independente da lista.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2 text-xs text-foreground">
+          <div className="rounded-xl bg-black/20 p-3 border border-white/10 space-y-1">
+            <h5 className="font-semibold text-primary flex items-center gap-1.5">
+              <span>⚙️</span> 1. Configuração do Administrador
+            </h5>
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              • <b>Grupo de Logs:</b> Adicione o bot no seu grupo e envie <code>/setlogs</code>. Se o grupo for fórum, o tópico <i>Divulgações pendentes</i> é criado na hora.<br />
+              • <b>Canal de Divulgação:</b> Adicione o bot como admin no canal de postagem e envie <code>/setcanal</code> (ou <code>/setcanal -100xxx</code>).
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-black/20 p-3 border border-white/10 space-y-1">
+            <h5 className="font-semibold text-primary flex items-center gap-1.5">
+              <span>👤</span> 2. Como os Usuários Enviam
+            </h5>
+            <p className="text-muted-foreground text-[11px]">
+              O usuário envia no privado do bot o modelo abaixo (em texto ou como legenda de foto/vídeo/gif):
+            </p>
+            <pre className="rounded-lg bg-black/40 p-2 font-mono text-[11px] select-all overflow-x-auto text-emerald-400">
+{`🆔 -100xxxxxxxxxx
+🌐 Nome do Canal/Grupo
+📝 Breve descrição sobre o canal
+📌 Categoria: #tags #tema
+🔗 https://t.me/seulink`}
+            </pre>
+            <p className="text-muted-foreground text-[11px]">
+              Depois, envia <b>/divulgar</b> para encaminhar aos moderadores.
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-black/20 p-3 border border-white/10 space-y-1">
+            <h5 className="font-semibold text-primary flex items-center gap-1.5">
+              <span>⚖️</span> 3. Moderação e Publicação
+            </h5>
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Os administradores avaliam no tópico de logs com botões <b>Aprovar</b> e <b>Desaprovar</b>. Ao aprovar, o bot posta no canal vinculado com a mídia, título em negrito, descrição em blockquote, tags e botões interativos com link direto!
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="primary" onClick={() => setPromoTutorialOpen(false)} className="w-full text-xs">
+            Entendido!
           </Button>
         </DialogFooter>
       </Dialog>

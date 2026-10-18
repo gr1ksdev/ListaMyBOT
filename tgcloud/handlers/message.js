@@ -239,6 +239,7 @@ async function handleMessage(m){
  if(cmd==='/suporte'){await privateScreen(user,'support',undefined,m.from);return;}
  if(cmd==='/link'){await privateScreen(user,'links',undefined,m.from);return;}
  if(cmd==='/ajuda'){await privateScreen(user,'help',undefined,m.from);return;}
+ if(cmd==='/tutorial'||cmd==='/divulgarajuda'){await privateScreen(user,'divulgar',undefined,m.from);return;}
  if(cmd==='/cancelar'){await privateScreen(user,'home',undefined,m.from);return;}
  if(text.startsWith('/'))await privateScreen(user,'home',undefined,m.from);
  return;

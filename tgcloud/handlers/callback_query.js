@@ -41,7 +41,7 @@ export default async function(q){
  if(action==='nav'){
   if(q.message.chat.type!=='private'||target!==user)return;
   await answer();
-  const allowed=['home','help','chats','links','profile','schedule','support','search','channels','groups'];
+  const allowed=['home','help','chats','links','profile','schedule','support','search','channels','groups','divulgar'];
   await privateScreen(user,allowed.includes(raw)?raw:'home',q.message,q.from);
   return;
  }

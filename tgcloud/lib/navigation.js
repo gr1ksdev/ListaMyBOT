@@ -103,6 +103,9 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
    { text: '❓ Ajuda', callback_data: 'nav:help' },
    { text: '💬 Suporte', callback_data: 'nav:support' }
   ]);
+  rows.push([
+   { text: '📢 Divulgar no Canal', callback_data: 'nav:divulgar' }
+  ]);
   if (await isAdmin(user)) {
    rows.push([{ text: '⚙️ Abrir painel admin', web_app: { url: APP_URL } }]);
   }
@@ -215,12 +218,41 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
   ]);
  } else if (view === 'help') {
   text = `❓ ${tgLink('Ajuda')} • <b><i>Como Participar da Lista</i></b>\n\n` +
-   `<blockquote><b><i>1️⃣ Adicione o bot como administrador no seu Canal ou Grupo.\n` +
-   `2️⃣ Conceda as permissões necessárias (enviar, apagar e fixar mensagens; no canal, editar mensagens).\n` +
-   `3️⃣ Escolha a categoria no menu do próprio chat e envie o cadastro.</i></b></blockquote>\n\n` +
-   `<b><i>✨ Pronto! Seu canal ou grupo participará das listas diárias de divulgação e receberá novos membros!</i></b>`;
+   `<blockquote><b><i>1️⃣ Como Participar da Lista Diária:\n` +
+   `• Adicione o bot como administrador no seu Canal ou Grupo.\n` +
+   `• Conceda as permissões necessárias e envie o cadastro no chat.\n` +
+   `• Seu canal/grupo participará das listas diárias de divulgação!</i></b></blockquote>\n\n` +
+   `<blockquote><b><i>2️⃣ Como Divulgar no Canal Exclusivo:\n` +
+   `• Envie a mídia (foto/vídeo/gif) ou texto com o modelo de ID, Nome, Descrição e #Tags.\n` +
+   `• Envie /divulgar para análise dos moderadores.\n` +
+   `• Ao ser aprovado, seu canal é publicado com destaque no canal oficial!</i></b></blockquote>\n\n` +
+   `<b><i>Toque no botão abaixo para ver o tutorial completo com modelo de cópia:</i></b>`;
+  rows.push([
+   { text: '📢 Tutorial: Divulgar no Canal', callback_data: 'nav:divulgar' }
+  ]);
   rows.push([
    { text: '👤 Meu Perfil', callback_data: 'nav:profile' },
+   { text: '💬 Suporte', callback_data: 'nav:support' }
+  ]);
+  rows.push([
+   { text: '🏠 Início', callback_data: 'nav:home' }
+  ]);
+ } else if (view === 'divulgar') {
+  text = `📢 ${tgLink('Divulgação no Canal')} • <b><i>Tutorial Passo a Passo</i></b>\n\n` +
+   `<blockquote><b><i>Esta funcionalidade permite divulgar seu Canal ou Grupo com destaque no nosso canal oficial de divulgações, com foto/vídeo, descrição e botões interativos!</i></b></blockquote>\n\n` +
+   `<b><i>📋 Passo a Passo para Enviar:</i></b>\n` +
+   `<blockquote><b><i>1. Copie o modelo abaixo e preencha com os dados do seu canal ou grupo:\n\n` +
+   `🆔 -100xxxxxxxxxx\n` +
+   `🌐 Nome do seu Canal/Grupo\n` +
+   `📝 Breve descrição sobre o canal\n` +
+   `📌 Categoria: #tags #tema\n` +
+   `🔗 https://t.me/seulink\n\n` +
+   `2. Envie aqui no privado (em texto puro ou como legenda de foto, vídeo ou gif).\n` +
+   `3. O bot salvará o rascunho. Envie o comando /divulgar para confirmar.\n` +
+   `4. A equipe avaliará no grupo de moderação. Ao ser aprovado, será publicado no canal oficial!</i></b></blockquote>\n\n` +
+   `<b><i>✨ Divulgue e alcance milhares de novos membros!</i></b>`;
+  rows.push([
+   { text: '❓ Ajuda Geral', callback_data: 'nav:help' },
    { text: '💬 Suporte', callback_data: 'nav:support' }
   ]);
   rows.push([
