@@ -17,3 +17,22 @@ export const deliveries = table('list_deliveries', {
  page: integer('page').notNull().default(0), messages: text('messages').notNull().default('[]'), attempts: integer('attempts').notNull().default(0), available: integer('available').notNull().default(0), error: text('error').notNull().default('')
 });
 export const runtime = table('list_runtime', { id: text('id').primaryKey(), value: text('value').notNull() });
+export const promotions = table('list_promotions', {
+  id: text('id').primaryKey(),
+  user_id: integer('user_id').notNull(),
+  user_name: text('user_name').notNull().default(''),
+  type: text('type').notNull().default('channel'),
+  title: text('title').notNull(),
+  description: text('description').notNull().default(''),
+  category: text('category').notNull().default(''),
+  url: text('url').notNull(),
+  media_type: text('media_type').notNull().default(''),
+  media_file_id: text('media_file_id').notNull().default(''),
+  status: text('status').notNull().default('pending'),
+  log_chat_id: integer('log_chat_id'),
+  log_message_id: integer('log_message_id'),
+  channel_message_id: integer('channel_message_id'),
+  created: integer('created').notNull(),
+  reviewed_by: integer('reviewed_by'),
+  reviewed_at: integer('reviewed_at')
+});
