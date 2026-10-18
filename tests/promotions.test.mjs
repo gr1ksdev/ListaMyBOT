@@ -254,7 +254,7 @@ test('aprovação publica no canal com descrição, tags, link e dois botões in
   const channelPost = calls.find(c => c.name === 'sendPhoto' && c.p.chat_id === -1001888888);
   assert.ok(channelPost);
   assert.match(channelPost.p.caption, /<b>Filmes &amp; Pipoca<\/b>/);
-  assert.match(channelPost.p.caption, /Resumos e indicações diárias\./);
+  assert.match(channelPost.p.caption, /<blockquote>Resumos e indicações diárias\.<\/blockquote>/);
   assert.match(channelPost.p.caption, /#filmes #dicas/);
   assert.match(channelPost.p.caption, /https:\/\/t\.me\/filmespipoca/);
 

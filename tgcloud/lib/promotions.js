@@ -404,7 +404,7 @@ ${status === 'pending' ? '<i>Avalie a divulgação abaixo:</i>' : '<i>Status fin
 export function formatPromoChannelMessage(promo) {
   return `<b>${escHtml(promo.title)}</b>
 
-${escHtml(promo.description)}
+<blockquote>${escHtml(promo.description)}</blockquote>
 
 ${escHtml(promo.category)}
 
