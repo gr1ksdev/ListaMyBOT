@@ -21,14 +21,25 @@ export function parsePromoPayload(rawText, media = null) {
     text = text.replace(/^\/divulgar(?:@[A-Za-z0-9_]+)?\s*/i, '').trim();
   }
 
-  // Type: CANAL or GRUPO
-  const typeMatch = text.match(/(?:🆔|ID|Tipo):\s*([^\n\r]+)/i) || text.match(/🆔\s*([^\n\r]+)/i);
+  // ID do Canal/Grupo (🆔)
+  const idMatch = text.match(/(?:🆔|ID):\s*([^\n\r]+)/i) || text.match(/🆔\s*([^\n\r]+)/i);
+  let chatId = '';
   let type = 'channel';
-  if (typeMatch) {
-    const rawType = typeMatch[1].trim().toLowerCase();
-    if (rawType.includes('grupo') || rawType.includes('group')) {
+  if (idMatch) {
+    const rawId = idMatch[1].trim();
+    const numMatch = rawId.match(/-?\d{5,}/);
+    if (numMatch) {
+      chatId = numMatch[0];
+    } else if (rawId.startsWith('@')) {
+      chatId = rawId.split(/\s+/)[0];
+    } else {
+      chatId = rawId;
+    }
+
+    const rawLower = rawId.toLowerCase();
+    if (rawLower.includes('grupo') || rawLower.includes('group')) {
       type = 'group';
-    } else if (rawType.includes('canal') || rawType.includes('channel')) {
+    } else if (rawLower.includes('canal') || rawLower.includes('channel')) {
       type = 'channel';
     }
   }
@@ -66,7 +77,7 @@ export function parsePromoPayload(rawText, media = null) {
   }
 
   const missing = [];
-  if (!typeMatch) missing.push('🆔 Tipo (CANAL ou GRUPO)');
+  if (!idMatch || !chatId) missing.push('🆔 ID do Canal ou Grupo (ex: 🆔 -100xxxxxxxxxx)');
   if (!title) missing.push('🌐 Nome do Canal/Grupo');
   if (!description) missing.push('📝 Descrição breve');
   if (!category) missing.push('📌 Categoria: #TAGS');
@@ -108,6 +119,7 @@ export function parsePromoPayload(rawText, media = null) {
   return {
     ok: true,
     data: {
+      chat_id: chatId,
       type,
       title,
       description,
@@ -218,17 +230,18 @@ export async function submitPromotion(user, data) {
 
   await db.run(
     `INSERT INTO list_promotions (
-      id, user_id, user_name, type, title, description, category, url,
+      id, user_id, user_name, chat_id, type, title, description, category, url,
       media_type, media_file_id, status, log_chat_id, log_message_id, created
     ) VALUES (
-      :id, :user_id, :user_name, :type, :title, :description, :category, :url,
+      :id, :user_id, :user_name, :chat_id, :type, :title, :description, :category, :url,
       :media_type, :media_file_id, 'pending', :log_chat, :log_msg, :now
     )`,
     {
       ':id': promoId,
       ':user_id': user.id,
       ':user_name': userName,
-      ':type': data.type,
+      ':chat_id': data.chat_id || '',
+      ':type': data.type || 'channel',
       ':title': data.title,
       ':description': data.description,
       ':category': data.category,
@@ -390,8 +403,11 @@ export function formatPromoLogMessage(promo, status = 'pending', reviewer = null
       ? `❌ <b>DIVULGAÇÃO RECUSADA</b> por <a href="tg://user?id=${reviewer?.id}">${escHtml(reviewerName)}</a>\n━━━━━━━━━━━━━━━━━━\n`
       : '📢 <b>Nova Divulgação Pendente</b>\n━━━━━━━━━━━━━━━━━━\n';
 
+  const typeTag = promo.type === 'group' ? '💬 Grupo' : '📢 Canal';
+  const chatDisplay = promo.chat_id ? `<code>${escHtml(promo.chat_id)}</code> (${typeTag})` : typeTag;
+
   return `${statusHeader}👤 <b>Autor:</b> <a href="tg://user?id=${promo.user_id}">${escHtml(promo.user_name || 'Usuário')}</a> (<code>${promo.user_id}</code>)
-🆔 <b>Tipo:</b> ${promo.type === 'channel' ? '📢 Canal' : '💬 Grupo'}
+🆔 <b>ID C/G:</b> ${chatDisplay}
 🌐 <b>Nome:</b> <b>${escHtml(promo.title)}</b>
 📝 <b>Descrição:</b>
 <blockquote>${escHtml(promo.description)}</blockquote>
@@ -412,7 +428,7 @@ ${promo.url}`;
 }
 
 export function promoTemplate() {
-  return `<code>🆔 Canal
+  return `<code>🆔 -100xxxxxxxxxx
 🌐 Nome do seu Canal
 📝 Breve descrição sobre o canal
 📌 Categoria: #tags #tema

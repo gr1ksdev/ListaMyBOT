@@ -65,6 +65,7 @@ beforeEach(() => {
     CREATE TABLE list_chats(id INTEGER PRIMARY KEY, title TEXT, type TEXT, url TEXT DEFAULT '', category INTEGER DEFAULT -1, status TEXT DEFAULT 'draft', owner INTEGER, updated INTEGER, menu_chat INTEGER, menu_id INTEGER, display TEXT DEFAULT '', position INTEGER DEFAULT 0, last_messages TEXT DEFAULT '[]', error TEXT DEFAULT '');
     CREATE TABLE list_promotions(
       id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, user_name TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL DEFAULT 'channel', title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
       category TEXT NOT NULL DEFAULT '', url TEXT NOT NULL, media_type TEXT NOT NULL DEFAULT '',
       media_file_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
@@ -107,9 +108,10 @@ const cbQuery = (data, user = 7595607953, target = -1001999999) => ({
 });
 
 test('parser extrai campos obrigatórios com texto solto e valida link', () => {
-  const payload = `🆔 CANAL\n🌐 Mundo Geek\nO melhor canal de filmes e séries da galáxia!\n📌 Categoria: #filmes #series\n🔗 https://t.me/mundogeek`;
+  const payload = `🆔 -1001234567890 (Canal)\n🌐 Mundo Geek\nO melhor canal de filmes e séries da galáxia!\n📌 Categoria: #filmes #series\n🔗 https://t.me/mundogeek`;
   const res = parsePromoPayload(payload);
   assert.equal(res.ok, true);
+  assert.equal(res.data.chat_id, '-1001234567890');
   assert.equal(res.data.type, 'channel');
   assert.equal(res.data.title, 'Mundo Geek');
   assert.equal(res.data.description, 'O melhor canal de filmes e séries da galáxia!');
@@ -119,10 +121,11 @@ test('parser extrai campos obrigatórios com texto solto e valida link', () => {
 });
 
 test('parser extrai mídia anexada (foto, video, gif)', () => {
-  const payload = `🆔 GRUPO\n🌐 Papo Aberto\nComunidade para bater papo sobre tecnologia.\n📌 Categoria: #tecnologia #dev\n🔗 https://t.me/papoaberto`;
+  const payload = `🆔 -1009876543210 (Grupo)\n🌐 Papo Aberto\nComunidade para bater papo sobre tecnologia.\n📌 Categoria: #tecnologia #dev\n🔗 https://t.me/papoaberto`;
   const photoMedia = { photo: [{ file_id: 'small' }, { file_id: 'large_photo_id' }] };
   const resPhoto = parsePromoPayload(payload, photoMedia);
   assert.equal(resPhoto.ok, true);
+  assert.equal(resPhoto.data.chat_id, '-1009876543210');
   assert.equal(resPhoto.data.type, 'group');
   assert.equal(resPhoto.data.media_type, 'photo');
   assert.equal(resPhoto.data.media_file_id, 'large_photo_id');
@@ -139,7 +142,7 @@ test('parser acusa erro quando faltam campos ou o link não é do Telegram', () 
   assert.equal(res1.ok, false);
   assert.match(res1.error, /Campos obrigatórios não encontrados/);
 
-  const badLink = `🆔 Canal\n🌐 Teste\nDesc\n📌 Categoria: #teste\n🔗 https://google.com`;
+  const badLink = `🆔 -1001234567890\n🌐 Teste\nDesc\n📌 Categoria: #teste\n🔗 https://google.com`;
   const res2 = parsePromoPayload(badLink);
   assert.equal(res2.ok, false);
   assert.match(res2.error, /link precisa ser um link válido do Telegram/);
@@ -183,16 +186,18 @@ test('comandos admin /setlogs e /setcanal salvam configurações de divulgação
 });
 
 test('envio de payload solto no privado gera rascunho com prévia e botão de confirmação', async () => {
-  const payload = `🆔 Canal\n🌐 Dev BR\nCanal de notícias e vagas para devs.\n📌 Categoria: #programacao #ti\n🔗 https://t.me/devbr`;
+  const payload = `🆔 -1001555555555\n🌐 Dev BR\nCanal de notícias e vagas para devs.\n📌 Categoria: #programacao #ti\n🔗 https://t.me/devbr`;
   await message(pm(payload));
 
   const draftMsg = calls.find(c => c.name === 'sendMessage' && c.p.text.includes('Divulgação pronta para envio'));
   assert.ok(draftMsg);
   assert.match(draftMsg.p.text, /Dev BR/);
+  assert.match(draftMsg.p.text, /-1001555555555/);
   assert.equal(draftMsg.p.reply_markup.inline_keyboard[0][0].callback_data, 'promo:confirm_submit');
 
   const draftInDb = JSON.parse(sql.prepare("SELECT value FROM list_runtime WHERE id='promo_draft:42'").get().value);
   assert.equal(draftInDb.title, 'Dev BR');
+  assert.equal(draftInDb.chat_id, '-1001555555555');
   assert.equal(draftInDb.url, 'https://t.me/devbr');
 });
 
@@ -205,7 +210,7 @@ test('confirmação via /divulgar ou botão encaminha para o tópico de logs com
     promoChannel: '-1001888888'
   }));
 
-  const payload = `🆔 Canal\n🌐 Cinema Total\nOs melhores lançamentos do cinema.\n📌 Categoria: #cinema #filmes\n🔗 https://t.me/cinematotal`;
+  const payload = `🆔 -1001777777777\n🌐 Cinema Total\nOs melhores lançamentos do cinema.\n📌 Categoria: #cinema #filmes\n🔗 https://t.me/cinematotal`;
   await message(pm(payload));
 
   // User sends /divulgar to submit
@@ -218,12 +223,14 @@ test('confirmação via /divulgar ou botão encaminha para o tópico de logs com
   assert.ok(logMsg);
   assert.equal(logMsg.p.message_thread_id, 888);
   assert.match(logMsg.p.text, /Nova Divulgação Pendente/);
+  assert.match(logMsg.p.text, /-1001777777777/);
   assert.match(logMsg.p.text, /Cinema Total/);
   assert.equal(logMsg.p.reply_markup.inline_keyboard[0][0].text, '✅ Aprovar');
   assert.equal(logMsg.p.reply_markup.inline_keyboard[0][1].text, '❌ Desaprovar');
 
   const promoRow = sql.prepare("SELECT * FROM list_promotions WHERE title='Cinema Total'").get();
   assert.equal(promoRow.status, 'pending');
+  assert.equal(promoRow.chat_id, '-1001777777777');
   assert.equal(promoRow.user_id, 42);
 });
 

@@ -111,7 +111,7 @@ async function handleMessage(m){
   if (parsed.ok) {
    await putState(`promo_draft:${user}`, parsed.data);
    const previewText = `📋 <b>Divulgação pronta para envio!</b>\n\n` +
-    `🆔 <b>Tipo:</b> ${parsed.data.type === 'channel' ? '📢 Canal' : '💬 Grupo'}\n` +
+    `🆔 <b>ID C/G:</b> <code>${escHtml(parsed.data.chat_id || 'Não informado')}</code> (${parsed.data.type === 'channel' ? '📢 Canal' : '💬 Grupo'})\n` +
     `🌐 <b>Nome:</b> <b>${escHtml(parsed.data.title)}</b>\n` +
     `📝 <b>Descrição:</b>\n<blockquote>${escHtml(parsed.data.description)}</blockquote>\n` +
     `📌 <b>Categoria / Tags:</b> ${escHtml(parsed.data.category)}\n` +

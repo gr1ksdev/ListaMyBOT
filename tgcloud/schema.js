@@ -21,6 +21,7 @@ export const promotions = table('list_promotions', {
   id: text('id').primaryKey(),
   user_id: integer('user_id').notNull(),
   user_name: text('user_name').notNull().default(''),
+  chat_id: text('chat_id').notNull().default(''),
   type: text('type').notNull().default('channel'),
   title: text('title').notNull(),
   description: text('description').notNull().default(''),
