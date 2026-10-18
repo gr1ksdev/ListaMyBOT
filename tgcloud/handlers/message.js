@@ -1,5 +1,5 @@
 import { api, db } from 'sdk';
-import { APP_URL, validLink, OWNER, validateSettings } from '../lib/domain.js';
+import { APP_URL, validLink, OWNER, OWNERS, isOwner, validateSettings } from '../lib/domain.js';
 import { getChat, isAdmin, state, putState, isBanned, config } from '../lib/store.js';
 import { register, menu, chatAdmin } from '../lib/registration.js';
 import { screen, privateScreen, escHtml } from '../lib/navigation.js';
@@ -106,10 +106,10 @@ async function handleMessage(m){
   return;
  }
  if (cmd === '/setadmin' || cmd === '/addadmin') {
-  if (!await isAdmin(user)) {
+  if (!isOwner(user)) {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: '🚫 <b>Acesso negado:</b> apenas o proprietário e administradores podem cadastrar novos administradores.',
+    text: '🚫 <b>Acesso negado:</b> apenas os proprietários (Owners) podem cadastrar novos administradores.',
     parse_mode: 'HTML'
    });
    return;
@@ -134,10 +134,10 @@ async function handleMessage(m){
    });
    return;
   }
-  if (targetId === OWNER) {
+  if (isOwner(targetId)) {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: `👑 O ID <code>${targetId}</code> já é o <b>Proprietário (Owner) permanente</b> do bot.`,
+    text: `👑 O ID <code>${targetId}</code> já é um <b>Proprietário (Owner) permanente</b> do bot.`,
     parse_mode: 'HTML'
    });
    return;
@@ -160,7 +160,7 @@ async function handleMessage(m){
    });
    return;
   }
-  const newAdmins = [...new Set([OWNER, ...currentAdmins, targetId])];
+  const newAdmins = [...new Set([...OWNERS, ...currentAdmins, targetId])];
   const updated = validateSettings({ ...c.settings, admins: newAdmins });
   if (c.version === 0) {
    await db.run('INSERT INTO list_settings(id, value, version) VALUES(1, :v, 1) ON CONFLICT(id) DO UPDATE SET value=excluded.value', { ':v': JSON.stringify(updated) });
@@ -177,10 +177,10 @@ async function handleMessage(m){
   return;
  }
  if (cmd === '/deladmin' || cmd === '/removeadmin') {
-  if (!await isAdmin(user)) {
+  if (!isOwner(user)) {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: '🚫 <b>Acesso negado:</b> apenas o proprietário e administradores podem remover administradores.',
+    text: '🚫 <b>Acesso negado:</b> apenas os proprietários (Owners) podem remover administradores.',
     parse_mode: 'HTML'
    });
    return;
@@ -199,10 +199,10 @@ async function handleMessage(m){
    });
    return;
   }
-  if (targetId === OWNER) {
+  if (isOwner(targetId)) {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: `❌ <b>Ação bloqueada:</b> O proprietário (Owner) permanente do bot não pode ser removido.`,
+    text: `❌ <b>Ação bloqueada:</b> Os proprietários (Owners) permanentes do bot não podem ser removidos.`,
     parse_mode: 'HTML'
    });
    return;
@@ -230,14 +230,15 @@ async function handleMessage(m){
  if (cmd === '/admins') {
   if (!await isAdmin(user)) return;
   const c = await config();
-  const currentAdmins = (c.settings.admins || []).filter(id => id !== OWNER);
+  const currentAdmins = (c.settings.admins || []).filter(id => !isOwner(id));
   await api.sendMessage({
    chat_id: m.chat.id,
    text: `🛡️ <b>Administradores do Bot:</b>\n\n` +
-         `👑 <b>Proprietário (Owner):</b> <code>${OWNER}</code>\n\n` +
+         `👑 <b>Proprietários (Owners):</b>\n` +
+         OWNERS.map(id => `• <code>${id}</code>`).join('\n') + `\n\n` +
          `<b>Administradores Adicionais (${currentAdmins.length}):</b>\n` +
          (currentAdmins.length ? currentAdmins.map(id => `• <code>${id}</code>`).join('\n') : '<i>Nenhum administrador adicional cadastrado.</i>') +
-         `\n\n<i>Para adicionar: <code>/setadmin &lt;ID&gt;</code></i>\n<i>Para remover: <code>/deladmin &lt;ID&gt;</code></i>`,
+         `\n\n<i>Gerenciamento exclusivo dos proprietários.</i>`,
    parse_mode: 'HTML'
   });
   return;

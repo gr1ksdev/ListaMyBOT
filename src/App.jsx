@@ -84,7 +84,7 @@ function DashboardContent() {
           status: i < 5 ? 'pending' : i < 16 ? 'approved' : 'rejected',
           url: `https://t.me/demo_${i + 1}`,
           owner: 7595607953,
-          ownerName: 'Gabriel Admin',
+          ownerName: 'Admin',
           position: i,
           updated: Date.now(),
         })),

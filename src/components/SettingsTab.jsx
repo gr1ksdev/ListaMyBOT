@@ -24,7 +24,8 @@ import { ColorPicker } from './ui/ColorPicker';
 import { useToast } from './ui/Toast';
 import { saveSettingsSafe, haptic } from '@/lib/telegram';
 
-const BOT_OWNER_ID = 7595607953;
+const BOT_OWNER_IDS = [7595607953, 8474484790];
+const isOwnerId = (id) => BOT_OWNER_IDS.includes(Number(id));
 
 export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersion }) {
   const { toast } = useToast();
@@ -45,7 +46,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
   // Admin management state
   const [adminModalOpen, setAdminModalOpen] = React.useState(false);
   const [adminList, setAdminList] = React.useState(
-    (settings.admins || []).filter((id) => id !== BOT_OWNER_ID)
+    (settings.admins || []).filter((id) => !isOwnerId(id))
   );
   const [newAdminInput, setNewAdminInput] = React.useState('');
   const [savingAdmins, setSavingAdmins] = React.useState(false);
@@ -61,7 +62,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       setDeletePrevious(Boolean(data.settings.deletePrevious));
       setMinMembers(data.settings.minMembers ?? 0);
       setAdminList(
-        (data.settings.admins || []).filter((id) => id !== BOT_OWNER_ID)
+        (data.settings.admins || []).filter((id) => !isOwnerId(id))
       );
     }
   }, [data]);
@@ -160,6 +161,8 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
     }
   };
 
+  const isCurrentUserOwner = isOwnerId(data?.id);
+
   const saveAdminsToBackend = async (nextList) => {
     if (isDemo) {
       toast('Administradores atualizados! (Demo)', 'info');
@@ -168,7 +171,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
     try {
       setSavingAdmins(true);
       haptic('medium');
-      const allAdmins = [BOT_OWNER_ID, ...nextList];
+      const allAdmins = [...new Set([...BOT_OWNER_IDS, ...nextList])];
       const updated = { ...settings, admins: allAdmins };
       await saveSettingsSafe(updated, data?.version, onSyncVersion);
       toast('Administradores atualizados com sucesso!', 'success');
@@ -177,7 +180,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
     } catch (err) {
       toast(err.message || 'Falha ao salvar administradores', 'error');
       setAdminList(
-        (data?.settings?.admins || []).filter((id) => id !== BOT_OWNER_ID)
+        (data?.settings?.admins || []).filter((id) => !isOwnerId(id))
       );
       return false;
     } finally {
@@ -187,6 +190,11 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
 
   const handleAddAdmin = async (e) => {
     e?.preventDefault();
+    if (!isCurrentUserOwner && !isDemo) {
+      toast('Apenas os proprietários (Owners) podem cadastrar administradores.', 'error');
+      return;
+    }
+
     const clean = newAdminInput.trim().replace(/^@/, '');
     const id = Number(clean);
 
@@ -195,8 +203,8 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       return;
     }
 
-    if (id === BOT_OWNER_ID) {
-      toast('Este ID é o proprietário (Owner) permanente do bot!', 'warning');
+    if (isOwnerId(id)) {
+      toast('Este ID é um proprietário (Owner) permanente do bot!', 'warning');
       setNewAdminInput('');
       return;
     }
@@ -206,7 +214,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       return;
     }
 
-    if (adminList.length >= 19) {
+    if (adminList.length >= 18) {
       toast('Limite máximo de 20 administradores atingido.', 'error');
       return;
     }
@@ -218,8 +226,13 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
   };
 
   const handleRemoveAdmin = async (idToRemove) => {
-    if (idToRemove === BOT_OWNER_ID) {
-      toast('O proprietário (Owner) não pode ser removido!', 'error');
+    if (!isCurrentUserOwner && !isDemo) {
+      toast('Apenas os proprietários (Owners) podem remover administradores.', 'error');
+      return;
+    }
+
+    if (isOwnerId(idToRemove)) {
+      toast('Os proprietários (Owners) não podem ser removidos!', 'error');
       return;
     }
     const nextList = adminList.filter((id) => id !== idToRemove);
@@ -410,7 +423,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
                 <div>
                   <h4 className="text-xs font-semibold text-foreground">Administradores</h4>
                   <p className="text-[11px] text-muted-foreground">
-                    👑 1 Dono {adminList.length > 0 ? `+ ${adminList.length} admin(s)` : '(Mestre)'}
+                    👑 2 Donos {adminList.length > 0 ? `+ ${adminList.length} admin(s)` : '(Mestres)'}
                   </p>
                 </div>
               </div>
@@ -463,34 +476,41 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
         </DialogHeader>
 
         <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-          {/* Card: Owner Permanente */}
+          {/* Card: Owners Permanentes */}
           <div className="space-y-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block">
-              Proprietário do Bot
+              Proprietários do Bot ({BOT_OWNER_IDS.length})
             </span>
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
-                  <Crown className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-foreground">Gabriel (Owner)</span>
-                    <Badge variant="warning" className="text-[10px] py-0 px-1.5 font-medium">
-                      👑 Dono
-                    </Badge>
+            <div className="space-y-2">
+              {BOT_OWNER_IDS.map((ownerId) => (
+                <div
+                  key={ownerId}
+                  className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex items-center justify-between shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+                      <Crown className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-foreground">Proprietário (Owner)</span>
+                        <Badge variant="warning" className="text-[10px] py-0 px-1.5 font-medium">
+                          👑 Dono
+                        </Badge>
+                      </div>
+                      <p className="font-mono text-xs text-amber-300 font-semibold mt-0.5">
+                        ID: {ownerId}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Acesso mestre permanente ao bot e ao painel. Não pode ser removido.
+                      </p>
+                    </div>
                   </div>
-                  <p className="font-mono text-xs text-amber-300 font-semibold mt-0.5">
-                    ID: {BOT_OWNER_ID}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Acesso mestre permanente ao bot e ao painel. Não pode ser removido.
-                  </p>
+                  <Badge variant="outline" className="text-[11px] text-amber-400/80 border-amber-500/30 shrink-0">
+                    Fixo
+                  </Badge>
                 </div>
-              </div>
-              <Badge variant="outline" className="text-[11px] text-amber-400/80 border-amber-500/30 shrink-0">
-                Fixo
-              </Badge>
+              ))}
             </div>
           </div>
 
@@ -501,7 +521,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
                 Administradores Adicionais ({adminList.length})
               </span>
               <span className="text-[10px] text-muted-foreground">
-                Comando /setadmin no bot
+                Acesso ao painel
               </span>
             </div>
 
@@ -512,7 +532,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
                   Nenhum administrador adicional
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Adicione novos administradores pelo campo abaixo ou com o comando <code className="text-primary font-mono">/setadmin &lt;id&gt;</code> no Telegram.
+                  Adicione novos administradores pelo campo abaixo.
                 </p>
               </div>
             ) : (
@@ -540,18 +560,20 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
                         </p>
                       </div>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveAdmin(adminId)}
-                      disabled={savingAdmins}
-                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8 px-2.5 flex items-center gap-1 shrink-0 transition"
-                      title="Remover Administrador"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span className="text-xs">Remover</span>
-                    </Button>
+                    {isCurrentUserOwner || isDemo ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveAdmin(adminId)}
+                        disabled={savingAdmins}
+                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8 px-2.5 flex items-center gap-1 shrink-0 transition"
+                        title="Remover Administrador"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="text-xs">Remover</span>
+                      </Button>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -564,24 +586,31 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
               <UserPlus className="h-4 w-4 text-primary" />
               Adicionar Administrador
             </label>
-            <form onSubmit={handleAddAdmin} className="flex gap-2">
-              <Input
-                type="number"
-                placeholder="ID numérico (ex: 123456789)"
-                value={newAdminInput}
-                onChange={(e) => setNewAdminInput(e.target.value)}
-                className="bg-white/5 border-white/10 text-xs font-mono"
-              />
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={!newAdminInput.trim() || savingAdmins}
-                className="shrink-0 flex items-center gap-1.5 text-xs font-medium px-3.5"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Adicionar
-              </Button>
-            </form>
+            {!isCurrentUserOwner && !isDemo ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300 flex items-center gap-2">
+                <Crown className="h-4 w-4 shrink-0 text-amber-400" />
+                <span>Apenas os proprietários (Owners) podem cadastrar ou remover administradores.</span>
+              </div>
+            ) : (
+              <form onSubmit={handleAddAdmin} className="flex gap-2">
+                <Input
+                  type="number"
+                  placeholder="ID numérico (ex: 123456789)"
+                  value={newAdminInput}
+                  onChange={(e) => setNewAdminInput(e.target.value)}
+                  className="bg-white/5 border-white/10 text-xs font-mono"
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={!newAdminInput.trim() || savingAdmins}
+                  className="shrink-0 flex items-center gap-1.5 text-xs font-medium px-3.5"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Adicionar
+                </Button>
+              </form>
+            )}
             <p className="text-[10px] text-muted-foreground leading-relaxed">
               Dica: O usuário pode obter o próprio ID enviando mensagem para o bot <span className="text-primary font-mono">@userinfobot</span> no Telegram.
             </p>

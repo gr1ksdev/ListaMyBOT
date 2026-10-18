@@ -1,8 +1,12 @@
 import {layoutPattern,repeatRows,paginateRows} from './layout.js';
+export const OWNERS = [7595607953, 8474484790];
 export const OWNER = 7595607953;
+export function isOwner(id) {
+ return OWNERS.includes(Number(id));
+}
 export const APP_URL = 'https://app8718726006.tgcloud.ai/';
 export const CATEGORIES = ['🌏 PADRÃO','🔞 Adulto +18','👫 Amizades','🏛 Apostas','😂 Comédia e Humor','🚩 Cursos','📍 Entretenimento','🎬 Filmes e Séries','💸 Investimentos','📚 Livros','🎵 Músicas','📰 Notícias'];
-export const DEFAULTS = { admins:[OWNER], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'' };
+export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'' };
 export function validateSettings(input, now=Date.now()) {
  const s=JSON.parse(JSON.stringify(input));
  s.minMembers=s.minMembers??0;
@@ -12,7 +16,7 @@ export function validateSettings(input, now=Date.now()) {
  if(![1,2,3,4,5].includes(s.columns)||!['alphabetical','manual','rotate'].includes(s.order)) throw Error('Layout inválido.');
  s.rowPattern=layoutPattern(s);
  if(!Array.isArray(s.admins)||s.admins.length>20||s.admins.some(x=>!Number.isSafeInteger(x)||x<=0)) throw Error('IDs de administradores inválidos.');
- s.admins=[...new Set([OWNER,...s.admins])];
+ s.admins=[...new Set([...OWNERS,...s.admins])];
  s.bannedUsers = Array.isArray(s.bannedUsers) ? [...new Set(s.bannedUsers.filter(x=>Number.isSafeInteger(x)&&x>0))] : [];
  s.buttonColor = typeof s.buttonColor === 'string' && AD_STYLES.includes(s.buttonColor) ? s.buttonColor : '';
  s.channelColor = typeof s.channelColor === 'string' && AD_STYLES.includes(s.channelColor) ? s.channelColor : '';

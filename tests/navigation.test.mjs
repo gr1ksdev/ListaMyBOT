@@ -230,7 +230,14 @@ test('comandos /setadmin, /deladmin e /admins gerenciam administradores com suce
  calls = [];
  await message(ownerMsg('/setadmin 7595607953'));
  const alreadyOwner = calls.find(x => x.name === 'sendMessage').p;
- assert.match(alreadyOwner.text, /Proprietário \(Owner\) permanente/);
+ assert.match(alreadyOwner.text, /Proprietário \(Owner\) permanente/i);
+
+ // Segundo owner tenta /setadmin com seu ID
+ calls = [];
+ const owner2Msg = text => ({ text, chat: { id: 8474484790, type: 'private' }, from: { id: 8474484790 } });
+ await message(owner2Msg('/setadmin 8474484790'));
+ const alreadyOwner2 = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(alreadyOwner2.text, /Proprietário \(Owner\) permanente/i);
 
  // Owner adiciona novo admin 123456789
  calls = [];
@@ -249,17 +256,23 @@ test('comandos /setadmin, /deladmin e /admins gerenciam administradores com suce
  await message(ownerMsg('/admins'));
  const adminsList = calls.find(x => x.name === 'sendMessage').p;
  assert.match(adminsList.text, /7595607953/);
+ assert.match(adminsList.text, /8474484790/);
  assert.match(adminsList.text, /123456789/);
 
  // Tentar remover owner com /deladmin é bloqueado
  calls = [];
  await message(ownerMsg('/deladmin 7595607953'));
  const blockedDel = calls.find(x => x.name === 'sendMessage').p;
- assert.match(blockedDel.text, /proprietário \(owner\) permanente/i);
+ assert.match(blockedDel.text, /proprietários? \(owners?\) permanente/i);
+
+ calls = [];
+ await message(owner2Msg('/deladmin 8474484790'));
+ const blockedDel2 = calls.find(x => x.name === 'sendMessage').p;
+ assert.match(blockedDel2.text, /proprietários? \(owners?\) permanente/i);
 
  // Remover admin 123456789
  calls = [];
- await message(ownerMsg('/deladmin 123456789'));
+ await message(owner2Msg('/deladmin 123456789'));
  const successDel = calls.find(x => x.name === 'sendMessage').p;
  assert.match(successDel.text, /Administrador removido com sucesso/);
 
