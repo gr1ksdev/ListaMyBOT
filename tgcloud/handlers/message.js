@@ -5,6 +5,7 @@ import { register, menu, chatAdmin } from '../lib/registration.js';
 import { screen, privateScreen, escHtml } from '../lib/navigation.js';
 import { parsePromoPayload, isPayloadLike, submitPromotion, ensurePromoTopic, promoTemplate, updatePromoConfig } from '../lib/promotions.js';
 import { ensureChatsTopic } from '../lib/chat_logs.js';
+import { getTicketByThreadId, getActiveTicketForUser, createTicket, closeTicket, relayUserMessage, relayAdminMessage, ensureSupportTopic } from '../lib/support.js';
 // Explicit commands should answer at the bottom of the conversation. Inline
 // callbacks keep editing their current menu, without producing new messages.
 export default async function(m){
@@ -29,6 +30,17 @@ async function handleMessage(m){
  const text=(m.text||m.caption||'').trim();const [word,...args]=text.split(/\s+/);const cmd=word.split('@')[0].toLowerCase();const user=m.from?.id;
  if(m.migrate_to_chat_id){await db.run('UPDATE list_chats SET id=:new,type=\'supergroup\' WHERE id=:old',{':new':m.migrate_to_chat_id,':old':m.chat.id});return;}
  const privateChat=m.chat.type==='private';
+ if (!privateChat && m.message_thread_id && !m.from?.is_bot) {
+  const ticket = await getTicketByThreadId(m.message_thread_id);
+  if (ticket && ticket.log_chat_id === m.chat.id) {
+   if (['/encerrar', '/fecharticket', '/fechar'].includes(cmd)) {
+    await closeTicket(ticket.code, m.from, 'Encerrado pelo moderador via comando');
+    return;
+   }
+   await relayAdminMessage(ticket, m);
+   return;
+  }
+ }
  if(privateChat && await isBanned(user)){
   await screen(user, `private_menu:${user}`, '🚫 <b><i>Acesso Suspenso</i></b>\n\n<blockquote><b><i>Você foi banido pelo administrador e não pode participar da lista de divulgação.</i></b></blockquote>\n\n<b><i>Caso tenha dúvidas, entre em contato com o suporte:</i></b>', [[{text:'💬 Suporte',callback_data:'nav:support'}]]);
   return;
@@ -56,33 +68,78 @@ async function handleMessage(m){
    await api.sendMessage({ chat_id: m.chat.id, text: 'Envie o comando dentro do grupo de logs ou informe o ID: <code>/setlogs -100xxxxxxxxxx</code>', parse_mode: 'HTML' });
    return;
   }
-  await updatePromoConfig({ promoLogChat: targetId, promoLogTopic: 0, chatsLogTopic: 0 });
-  const promoRes = await ensurePromoTopic(targetId);
-  const chatsRes = await ensureChatsTopic(targetId);
-  const updateObj = {};
-  const createdTopics = [];
-  if (promoRes.ok && promoRes.topicId) {
-   updateObj.promoLogTopic = promoRes.topicId;
-   createdTopics.push(`• Divulgações pendentes (ID: <code>${promoRes.topicId}</code>)`);
-  }
-  if (chatsRes.ok && chatsRes.topicId) {
-   updateObj.chatsLogTopic = chatsRes.topicId;
-   createdTopics.push(`• Cadastros pendentes (ID: <code>${chatsRes.topicId}</code>)`);
-  }
-  if (Object.keys(updateObj).length > 0) {
-   await updatePromoConfig(updateObj);
+  const currentCfg = await config();
+  const currentChatId = Number(currentCfg.settings.promoLogChat || 0);
+  const isSameGroup = currentChatId === Number(targetId);
+
+  let promoTopicId = isSameGroup ? Number(currentCfg.settings.promoLogTopic || 0) : 0;
+  let chatsTopicId = isSameGroup ? Number(currentCfg.settings.chatsLogTopic || 0) : 0;
+  let supportTopicId = isSameGroup ? Number(currentCfg.settings.supportLogTopic || 0) : 0;
+
+  const topicsList = [];
+  const errors = [];
+
+  if (promoTopicId > 0) {
+   topicsList.push(`• Divulgações pendentes (ID: <code>${promoTopicId}</code>) <i>[Já configurado]</i>`);
+  } else {
+   const promoRes = await ensurePromoTopic(targetId);
+   if (promoRes.ok && promoRes.topicId) {
+    promoTopicId = promoRes.topicId;
+    topicsList.push(`• Divulgações pendentes (ID: <code>${promoRes.topicId}</code>) <i>[Criado]</i>`);
+   } else if (promoRes.error) {
+    errors.push(`Divulgações: ${promoRes.error}`);
+   }
   }
 
-  if (createdTopics.length > 0) {
+  if (chatsTopicId > 0) {
+   topicsList.push(`• Cadastros pendentes (ID: <code>${chatsTopicId}</code>) <i>[Já configurado]</i>`);
+  } else {
+   if (promoTopicId > 0 && !isSameGroup) {
+    await new Promise(r => setTimeout(r, 1200));
+   }
+   const chatsRes = await ensureChatsTopic(targetId);
+   if (chatsRes.ok && chatsRes.topicId) {
+    chatsTopicId = chatsRes.topicId;
+    topicsList.push(`• Cadastros pendentes (ID: <code>${chatsRes.topicId}</code>) <i>[Criado]</i>`);
+   } else if (chatsRes.error) {
+    errors.push(`Cadastros: ${chatsRes.error}`);
+   }
+  }
+
+  if (supportTopicId > 0) {
+   topicsList.push(`• Suporte & Dúvidas (ID: <code>${supportTopicId}</code>) <i>[Já configurado]</i>`);
+  } else {
+   if ((promoTopicId > 0 || chatsTopicId > 0) && (!isSameGroup || !chatsTopicId)) {
+    await new Promise(r => setTimeout(r, 1200));
+   }
+   const supportRes = await ensureSupportTopic(targetId);
+   if (supportRes.ok && supportRes.topicId) {
+    supportTopicId = supportRes.topicId;
+    topicsList.push(`• Suporte & Dúvidas (ID: <code>${supportRes.topicId}</code>) <i>[Criado]</i>`);
+   } else if (supportRes.error) {
+    errors.push(`Suporte: ${supportRes.error}`);
+   }
+  }
+
+  await updatePromoConfig({
+   promoLogChat: targetId,
+   promoLogTopic: promoTopicId,
+   chatsLogTopic: chatsTopicId,
+   supportLogTopic: supportTopicId
+  });
+
+  if (topicsList.length > 0) {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: `✅ <b>Grupo de logs configurado com sucesso!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n📌 <b>Tópicos criados:</b>\n${createdTopics.join('\n')}\n\nTodas as solicitações de divulgação e cadastros da lista serão enviadas para seus respectivos tópicos.`,
+    text: `✅ <b>Grupo de logs configurado com sucesso!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n📌 <b>Status dos tópicos:</b>\n${topicsList.join('\n')}` +
+     (errors.length ? `\n\n⚠️ <i>Avisos:</i>\n${errors.join('\n')}` : '') +
+     `\n\nTodas as solicitações de divulgação, cadastros e suporte serão enviadas para seus respectivos tópicos.`,
     parse_mode: 'HTML'
    });
   } else {
    await api.sendMessage({
     chat_id: m.chat.id,
-    text: `✅ <b>Grupo de logs configurado!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n<i>Aviso: ${escHtml(promoRes.error || chatsRes.error || 'O grupo não possui tópicos ativados.')} As mensagens serão enviadas no chat geral.</i>`,
+    text: `✅ <b>Grupo de logs configurado!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n<i>Aviso: ${escHtml(errors.join(' | ') || 'O grupo não possui tópicos ativados.')} As mensagens serão enviadas no chat geral.</i>`,
     parse_mode: 'HTML'
    });
   }
@@ -115,6 +172,7 @@ async function handleMessage(m){
          `• <b>Grupo de Logs:</b> <code>${c.settings.promoLogChat || 'Não configurado'}</code>\n` +
          `• <b>Tópico de Divulgações:</b> <code>${c.settings.promoLogTopic || 'Nenhum (chat principal)'}</code>\n` +
          `• <b>Tópico de Cadastros:</b> <code>${c.settings.chatsLogTopic || 'Nenhum (chat principal)'}</code>\n` +
+         `• <b>Tópico de Suporte:</b> <code>${c.settings.supportLogTopic || 'Nenhum (chat principal)'}</code>\n` +
          `• <b>Canal Vinculado:</b> <code>${c.settings.promoChannel || 'Não vinculado'}</code>\n\n` +
          `<i>Use /setlogs no grupo de logs e /setcanal no canal de publicação.</i>`,
    parse_mode: 'HTML'
@@ -260,6 +318,74 @@ async function handleMessage(m){
   return;
  }
  if(privateChat){
+  const supportKey = `await_support_msg:${user}`;
+  const waitingSupport = await state(supportKey, false);
+  if (waitingSupport) {
+   await putState(supportKey, null);
+   if (cmd === '/cancelar') {
+    await privateScreen(user, 'home', undefined, m.from);
+    return;
+   }
+   if (!text.startsWith('/') && text) {
+    const res = await createTicket(m.from, text);
+    if (res.ok) {
+     await api.sendMessage({
+      chat_id: user,
+      text: `⏳ <b>Solicitação Recebida — Ticket #${res.ticket.code}</b>\n\n` +
+       `<blockquote><b><i>Por favor, aguarde um momento. Um de nossos administradores já vai te atender!</i></b></blockquote>\n\n` +
+       `<i>Assim que o atendimento for iniciado por um moderador, você receberá uma notificação aqui e tudo o que você digitar será encaminhado diretamente a ele.</i>`,
+      parse_mode: 'HTML',
+      reply_markup: {
+       inline_keyboard: [
+        [{ text: '🛑 Cancelar Solicitação', callback_data: `ticket:user_close:${res.ticket.code}` }]
+       ]
+      }
+     });
+     return;
+    } else {
+     await api.sendMessage({
+      chat_id: user,
+      text: `⚠️ <b>Não foi possível abrir o chamado:</b>\n\n${escHtml(res.error || 'Erro inesperado')}\n\n<i>Tente novamente mais tarde ou use /suporte.</i>`,
+      parse_mode: 'HTML',
+      reply_markup: {
+       inline_keyboard: [
+        [{ text: '‹ Voltar ao Suporte', callback_data: 'nav:support' }]
+       ]
+      }
+     });
+     return;
+    }
+   }
+  }
+
+  const activeTicket = await getActiveTicketForUser(user);
+  if (activeTicket) {
+   if (['/encerrar', '/fecharticket', '/fechar'].includes(cmd)) {
+    await closeTicket(activeTicket.code, m.from, 'Encerrado pelo usuário via comando');
+    return;
+   }
+   if (!text.startsWith('/')) {
+    if (activeTicket.status === 'open') {
+     await relayUserMessage(activeTicket, m);
+     return;
+    } else {
+     await api.sendMessage({
+      chat_id: user,
+      text: `⏳ <b>Solicitação em Espera — Ticket #${activeTicket.code}</b>\n\n` +
+       `<blockquote><b><i>Por favor, aguarde um momento. Um de nossos administradores já vai te atender!</i></b></blockquote>\n\n` +
+       `<i>Assim que o administrador responder, suas mensagens serão encaminhadas diretamente para ele!</i>`,
+      parse_mode: 'HTML',
+      reply_markup: {
+       inline_keyboard: [
+        [{ text: '🛑 Cancelar Solicitação', callback_data: `ticket:user_close:${activeTicket.code}` }]
+       ]
+      }
+     });
+     return;
+    }
+   }
+  }
+
  if (!text.startsWith('/') && isPayloadLike(text)) {
   const parsed = parsePromoPayload(text, m);
   if (parsed.ok) {
@@ -391,6 +517,10 @@ async function handleMessage(m){
  if(cmd==='/grupos'){await privateScreen(user,'groups',undefined,m.from);return;}
  if(cmd==='/pesquisar'){await privateScreen(user,'search',undefined,m.from);return;}
  if(cmd==='/suporte'){await privateScreen(user,'support',undefined,m.from);return;}
+ if(cmd==='/encerrar'||cmd==='/fecharticket'||cmd==='/fechar'){
+  await api.sendMessage({ chat_id: user, text: 'ℹ️ Você não possui nenhum chamado de suporte ativo no momento.' });
+  return;
+ }
  if(cmd==='/link'){await privateScreen(user,'links',undefined,m.from);return;}
  if(cmd==='/ajuda'){await privateScreen(user,'help',undefined,m.from);return;}
  if(cmd==='/tutorial'||cmd==='/divulgarajuda'){await privateScreen(user,'divulgar',undefined,m.from);return;}

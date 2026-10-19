@@ -37,3 +37,23 @@ export const promotions = table('list_promotions', {
   reviewed_by: integer('reviewed_by'),
   reviewed_at: integer('reviewed_at')
 });
+export const tickets = table('list_tickets', {
+  id: text('id').primaryKey(),
+  code: text('code').notNull(),
+  user_id: integer('user_id').notNull(),
+  user_name: text('user_name').notNull().default(''),
+  user_username: text('user_username').notNull().default(''),
+  status: text('status').notNull().default('pending'),
+  initial_message: text('initial_message').notNull().default(''),
+  log_chat_id: integer('log_chat_id'),
+  log_message_id: integer('log_message_id'),
+  thread_id: integer('thread_id'),
+  topic_name: text('topic_name').notNull().default(''),
+  assigned_to: integer('assigned_to'),
+  assigned_name: text('assigned_name').notNull().default(''),
+  created: integer('created').notNull(),
+  updated: integer('updated').notNull(),
+  closed_at: integer('closed_at'),
+  closed_by: integer('closed_by')
+});
+

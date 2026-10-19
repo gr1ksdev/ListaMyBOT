@@ -1,14 +1,8 @@
 import { api, db } from 'sdk';
-import { APP_URL, OWNER } from './domain.js';
+import { APP_URL, OWNER, escHtml } from './domain.js';
 import { isAdmin, state, putState, config } from './store.js';
-
-export function escHtml(str) {
- return String(str ?? '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;');
-}
+import { getActiveTicketForUser } from './support.js';
+export { escHtml };
 
 function formatRegDate(timestamp) {
  const d = new Date(timestamp || Date.now());
@@ -71,6 +65,7 @@ export async function screen(target, key, text, rows, message, parseMode = 'HTML
 export async function privateScreen(user, view = 'home', message, fromUser) {
  await putState(`await_link:${user}`, null);
  if (view !== 'search') await putState(`await_search:${user}`, null);
+ if (view !== 'support') await putState(`await_support_msg:${user}`, null);
 
  const me = await api.getMe();
  const botLink = `tg://user?id=${me.id}`;
@@ -263,16 +258,46 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
    { text: '🏠 Início', callback_data: 'nav:home' }
   ]);
  } else if (view === 'support') {
-  text = `💬 ${tgLink('Suporte & Atendimento')} • <b><i>Fale Conosco</i></b>\n\n` +
-   `<blockquote><b><i>Dúvidas sobre o funcionamento, parcerias ou auxílio na configuração do bot?\n` +
-   `Estamos à disposição para ajudar você a crescer!</i></b></blockquote>\n\n` +
-   `<b><i>Toque no botão abaixo para conversar em tempo real com nossa equipe:</i></b>`;
-  rows.push([
-   { text: '💬 Chamar no Suporte', url: `tg://user?id=${OWNER}` }
-  ]);
-  rows.push([
-   { text: '🏠 Início', callback_data: 'nav:home' }
-  ]);
+  const activeTicket = await getActiveTicketForUser(user);
+  if (activeTicket) {
+   const isWaiting = activeTicket.status === 'pending';
+   const dateStr = new Date(activeTicket.created).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+   if (isWaiting) {
+    text = `⏳ ${tgLink('Solicitação em Andamento')} • <b>#${activeTicket.code}</b>\n\n` +
+     `<b>Status:</b> ⏳ <b>Aguardando Administrador</b>\n` +
+     `📅 <b>Enviado em:</b> ${dateStr}\n\n` +
+     `💬 <b>Sua dúvida enviada:</b>\n<blockquote>${escHtml(activeTicket.initial_message)}</blockquote>\n\n` +
+     `<blockquote><b><i>Por favor, aguarde um momento. Um de nossos administradores já vai te atender!</i></b></blockquote>`;
+    rows.push([
+     { text: '🛑 Cancelar Solicitação', callback_data: `ticket:user_close:${activeTicket.code}` }
+    ]);
+    rows.push([
+     { text: '🏠 Início', callback_data: 'nav:home' }
+    ]);
+   } else {
+    text = `🎫 ${tgLink('Atendimento em Andamento')} • <b>#${activeTicket.code}</b>\n\n` +
+     `<b>Status:</b> 🟢 <b>Em Atendimento</b>\n` +
+     (activeTicket.assigned_name ? `👨‍💼 <b>Atendente:</b> ${escHtml(activeTicket.assigned_name)}\n` : '') +
+     `📅 <b>Iniciado em:</b> ${dateStr}\n\n` +
+     `💬 <b>Dúvida inicial:</b>\n<blockquote>${escHtml(activeTicket.initial_message)}</blockquote>\n\n` +
+     `<blockquote><b><i>Tudo o que você digitar aqui no chat será entregue diretamente ao atendente no tópico de suporte. Pode enviar suas mensagens!</i></b></blockquote>`;
+    rows.push([
+     { text: '🛑 Encerrar Atendimento', callback_data: `ticket:user_close:${activeTicket.code}` }
+    ]);
+    rows.push([
+     { text: '🏠 Início', callback_data: 'nav:home' }
+    ]);
+   }
+  } else {
+   await putState(`await_support_msg:${user}`, true);
+   text = `💬 ${tgLink('Suporte & Atendimento')} • <b><i>Fale Conosco</i></b>\n\n` +
+    `<blockquote><b><i>Envie abaixo uma mensagem detalhando a sua dúvida ou o que você precisa.</i></b></blockquote>\n\n` +
+    `<i>Nossa equipe de administradores já vai te atender!</i>\n\n` +
+    `<i>Ou toque no botão abaixo para voltar:</i>`;
+   rows.push([
+    { text: '‹ Voltar ao Início', callback_data: 'nav:home' }
+   ]);
+  }
  } else {
   const all = await db.all('SELECT id, title, status FROM list_chats WHERE owner=:id ORDER BY updated DESC LIMIT 40', { ':id': user });
   const list = [];

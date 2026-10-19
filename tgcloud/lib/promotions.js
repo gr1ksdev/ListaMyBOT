@@ -150,11 +150,26 @@ export async function ensurePromoTopic(logChatId) {
     if (member.status !== 'creator' && !member.can_manage_topics) {
       return { ok: false, isForum: true, error: 'O bot precisa da permissão "Gerenciar tópicos" (can_manage_topics) como administrador.' };
     }
-    const topic = await api.createForumTopic({
-      chat_id: logChatId,
-      name: 'Divulgações pendentes',
-      icon_color: 7322096
-    });
+    let topic;
+    try {
+      topic = await api.createForumTopic({
+        chat_id: logChatId,
+        name: 'Divulgações pendentes',
+        icon_color: 7322096
+      });
+    } catch (createErr) {
+      if (createErr.parameters?.retry_after) {
+        const waitMs = (createErr.parameters.retry_after + 1) * 1000;
+        await new Promise(r => setTimeout(r, Math.min(waitMs, 5000)));
+        topic = await api.createForumTopic({
+          chat_id: logChatId,
+          name: 'Divulgações pendentes',
+          icon_color: 7322096
+        });
+      } else {
+        throw createErr;
+      }
+    }
     return { ok: true, isForum: true, topicId: topic.message_thread_id, name: topic.name };
   } catch (err) {
     return { ok: false, error: err.description || err.message };

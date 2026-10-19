@@ -6,10 +6,11 @@ import { chatAdmin, menu, submit, register, closeMenu } from '../lib/registratio
 import { privateScreen, escHtml } from '../lib/navigation.js';
 import { submitPromotion, approvePromotion, rejectPromotion } from '../lib/promotions.js';
 import { formatChatSubmissionMessage, chatSubmissionKeyboard } from '../lib/chat_logs.js';
+import { startTicketService, closeTicket, reopenTicket } from '../lib/support.js';
 export default async function(q){
  if(!q.message)return;
  const [action,raw,value]=String(q.data||'').split(':');const target=q.message.chat.id;const user=q.from.id;
- if(!['nav','cfg','cats','cat','link','submit','recheck','promo','chat_adm','cancel'].includes(action))return;
+ if(!['nav','cfg','cats','cat','link','submit','recheck','promo','chat_adm','cancel','ticket','support'].includes(action))return;
  let answered=false;const answer=async(text,alert=false)=>{if(!answered){await api.answerCallbackQuery({callback_query_id:q.id,...(text?{text,show_alert:alert}:{})});answered=true;}};
  try{
  if(action==='promo'){
@@ -96,6 +97,84 @@ export default async function(q){
       parse_mode:'HTML'
      });
     }catch{}
+   }
+   return;
+  }
+  return;
+ }
+ if (action === 'support') {
+  await answer();
+  await privateScreen(user, 'support', q.message, q.from);
+  return;
+ }
+ if (action === 'ticket') {
+  if (raw === 'reply') {
+   const isBotAdm = await isAdmin(user);
+   const isChatAdm = target < 0 ? await chatAdmin(target, user) : false;
+   if (!isBotAdm && !isChatAdm) {
+    await answer('Apenas administradores podem atender chamados.', true);
+    return;
+   }
+   await answer('Iniciando atendimento...');
+   const res = await startTicketService(value, q.from);
+   if (!res.ok) {
+    await answer(res.error || 'Não foi possível iniciar o atendimento.', true);
+   }
+   return;
+  }
+  if (raw === 'close') {
+   const isBotAdm = await isAdmin(user);
+   const isChatAdm = target < 0 ? await chatAdmin(target, user) : false;
+   if (!isBotAdm && !isChatAdm) {
+    await answer('Apenas administradores podem encerrar chamados.', true);
+    return;
+   }
+   await answer('Encerrando atendimento...');
+   const res = await closeTicket(value, q.from, 'Encerrado pelo moderador');
+   if (!res.ok) {
+    await answer(res.error || 'Não foi possível encerrar.', true);
+   }
+   return;
+  }
+  if (raw === 'user_close') {
+   await answer('Encerrando...');
+   try {
+    await api.deleteMessage({ chat_id: user, message_id: q.message.message_id });
+   } catch {}
+   const res = await closeTicket(value, q.from, 'Encerrado pelo usuário');
+   if (!res.ok && res.alreadyClosed) {
+    await privateScreen(user, 'support', undefined, q.from);
+   } else if (!res.ok) {
+    await answer(res.error || 'Não foi possível encerrar.', true);
+   }
+   return;
+  }
+  if (raw === 'reopen') {
+   const isBotAdm = await isAdmin(user);
+   const isChatAdm = target < 0 ? await chatAdmin(target, user) : false;
+   if (!isBotAdm && !isChatAdm) {
+    await answer('Apenas administradores podem reabrir chamados.', true);
+    return;
+   }
+   await answer('Reabrindo atendimento...');
+   const res = await reopenTicket(value, q.from);
+   if (!res.ok) {
+    await answer(res.error || 'Não foi possível reabrir o atendimento.', true);
+   }
+   return;
+  }
+  if (raw === 'user_reopen') {
+   await answer('Reabrindo chamado...');
+   try {
+    await api.editMessageReplyMarkup({
+     chat_id: user,
+     message_id: q.message.message_id,
+     reply_markup: { inline_keyboard: [[{ text: '🏠 Menu Principal', callback_data: 'nav:home' }]] }
+    });
+   } catch {}
+   const res = await reopenTicket(value, q.from);
+   if (!res.ok) {
+    await answer(res.error || 'Não foi possível reabrir o chamado.', true);
    }
    return;
   }
