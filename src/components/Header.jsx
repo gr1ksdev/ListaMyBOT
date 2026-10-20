@@ -7,6 +7,7 @@ import { haptic } from '@/lib/telegram';
 export function Header({ data, loading, onRefresh, isDemo }) {
   const isOnline = data?.schedulerHeartbeat && Date.now() - data.schedulerHeartbeat < 120000;
   const isScheduled = data?.settings?.schedule?.enabled;
+  const isMaintenance = Boolean(data?.settings?.maintenance?.enabled);
 
   const handleRefresh = () => {
     haptic('light');
@@ -39,15 +40,32 @@ export function Header({ data, loading, onRefresh, isDemo }) {
                   DEMO
                 </Badge>
               )}
+              {isMaintenance && (
+                <Badge variant="warning" className="text-[9px] py-0 px-1.5 h-3.5">
+                  MANUTENÇÃO
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1">
                 <span
                   className={`inline-block h-1.5 w-1.5 rounded-full ${
-                    isOnline ? 'bg-emerald-400' : isScheduled ? 'bg-amber-400' : 'bg-muted-foreground/50'
+                    isMaintenance
+                      ? 'bg-amber-400'
+                      : isOnline
+                        ? 'bg-emerald-400'
+                        : isScheduled
+                          ? 'bg-amber-400'
+                          : 'bg-muted-foreground/50'
                   }`}
                 />
-                {isOnline ? 'Agendador ativo' : isScheduled ? 'Aguardando cron' : 'Manual'}
+                {isMaintenance
+                  ? 'Manutenção ativa'
+                  : isOnline
+                    ? 'Agendador ativo'
+                    : isScheduled
+                      ? 'Aguardando cron'
+                      : 'Manual'}
               </span>
               <span>•</span>
               <span className="font-mono opacity-70">v{data?.version || 1}</span>

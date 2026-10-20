@@ -1,11 +1,11 @@
 import { db, EndpointError } from 'sdk';
 import { requireAdmin, getChat } from '../lib/store.js';
-import { validLink, CATEGORIES } from '../lib/domain.js';
-import { checkMembers } from '../lib/membership.js';
-import { rights } from '../lib/registration.js';
+import { approveChat } from '../lib/moderation.js';
+import { notifyChatOwner, updateChatSubmissionLog } from '../lib/chat_logs.js';
 
 export default async function(input, ctx) {
- const { settings } = await requireAdmin(ctx);
+ const auth = await requireAdmin(ctx);
+ const reviewer = ctx?.initData?.user || { id: auth.id };
  let owner = Number(input.owner);
  if (!owner && input.id) {
   const c = await getChat(input.id);
@@ -17,22 +17,24 @@ export default async function(input, ctx) {
  if (!pending.length) return { ok: true, count: 0, message: 'Nenhum cadastro pendente para este usuário.' };
 
  let approvedCount = 0;
- const now = Date.now();
  for (const c of pending) {
-  if (!validLink(c.url) || !CATEGORIES[c.category]) continue;
   try {
-   const missing = await rights(c);
-   if (missing.length) continue;
-   const mem = await checkMembers(c, settings);
-   if (!mem.ok) continue;
+   const result = await approveChat(c, auth.settings);
+   if (!result.ok) {
+    const reason = result.reason || 'Cadastro rejeitado automaticamente.';
+    const updated = { ...c, status: 'rejected', error: reason };
+    await notifyChatOwner(updated, 'rejected', reason, reviewer);
+    await updateChatSubmissionLog(updated, 'rejected', reviewer, reason);
+    continue;
+   }
+   approvedCount++;
+   const updated = { ...c, status: 'approved', error: '' };
+   await notifyChatOwner(updated, 'approved', '', reviewer);
+   await updateChatSubmissionLog(updated, 'approved', reviewer);
   } catch {
+   // A single invalid/banned/permission-broken chat must not block the others.
    continue;
   }
-  await db.run("UPDATE list_chats SET status='approved', error='', updated=:n WHERE id=:id AND status='pending'", {
-   ':n': now,
-   ':id': c.id
-  });
-  approvedCount++;
  }
 
  return { ok: true, count: approvedCount, total: pending.length };

@@ -5,7 +5,7 @@ globalThis.__NAV_SDK=sdk;
 registerHooks({resolve(specifier,ctx,next){if(specifier==='sdk')return {url:'test:sdk',shortCircuit:true};return next(specifier,ctx);},load(url,ctx,next){if(url==='test:sdk')return {format:'module',source:'export const {db,api,EndpointError}=globalThis.__NAV_SDK;',shortCircuit:true};return next(url,ctx);}});
 const {default:message}=await import('../tgcloud/handlers/message.js');const {default:callback}=await import('../tgcloud/handlers/callback_query.js');const {default:moderate}=await import('../tgcloud/endpoints/moderateChat.js');
 beforeEach(()=>{sql?.close();sql=new DatabaseSync(':memory:');sql.exec(`CREATE TABLE list_runtime(id TEXT PRIMARY KEY,value TEXT);CREATE TABLE list_settings(id INTEGER PRIMARY KEY,value TEXT,version INTEGER);CREATE TABLE list_chats(id INTEGER PRIMARY KEY,title TEXT,type TEXT,url TEXT DEFAULT '',category INTEGER DEFAULT -1,status TEXT DEFAULT 'draft',owner INTEGER,updated INTEGER,menu_chat INTEGER,menu_id INTEGER,display TEXT DEFAULT '',position INTEGER DEFAULT 0,last_messages TEXT DEFAULT '[]',error TEXT DEFAULT '');CREATE TABLE list_ads(id INTEGER PRIMARY KEY,title TEXT NOT NULL,url TEXT NOT NULL DEFAULT '',slot_row INTEGER NOT NULL DEFAULT 0,slot_col INTEGER NOT NULL DEFAULT 0,style TEXT NOT NULL DEFAULT '',updated INTEGER NOT NULL);CREATE TABLE list_rounds(id TEXT PRIMARY KEY, created INTEGER, content TEXT, status TEXT);CREATE TABLE list_deliveries(id TEXT PRIMARY KEY, round TEXT, chat INTEGER, status TEXT, page INTEGER, messages TEXT, attempts INTEGER, available INTEGER, error TEXT);`);calls=[];sent=0;member='administrator';memberCount=100;countError=false;});
-const {DEFAULTS,CATEGORIES}=await import('../tgcloud/lib/domain.js');const {register,submit,keyboard,menu}=await import('../tgcloud/lib/registration.js');const {default:myChatMember}=await import('../tgcloud/handlers/my_chat_member.js');const {default:updateChat}=await import('../tgcloud/endpoints/updateChat.js');const {default:saveAds}=await import('../tgcloud/endpoints/saveAds.js');const {default:removeNow}=await import('../tgcloud/endpoints/removeNow.js');const {removeLists,processQueue}=await import('../tgcloud/lib/dispatch.js');const {default:approveUserChats}=await import('../tgcloud/endpoints/approveUserChats.js');const {default:removeChat}=await import('../tgcloud/endpoints/removeChat.js');const {default:banUser}=await import('../tgcloud/endpoints/banUser.js');
+const {DEFAULTS,CATEGORIES}=await import('../tgcloud/lib/domain.js');const {register,submit,keyboard,menu}=await import('../tgcloud/lib/registration.js');const {default:myChatMember}=await import('../tgcloud/handlers/my_chat_member.js');const {default:updateChat}=await import('../tgcloud/endpoints/updateChat.js');const {default:saveAds}=await import('../tgcloud/endpoints/saveAds.js');const {default:removeNow}=await import('../tgcloud/endpoints/removeNow.js');const {removeLists,processQueue,createRound}=await import('../tgcloud/lib/dispatch.js');const {default:approveUserChats}=await import('../tgcloud/endpoints/approveUserChats.js');const {default:removeChat}=await import('../tgcloud/endpoints/removeChat.js');const {default:banUser}=await import('../tgcloud/endpoints/banUser.js');const {default:saveSettings}=await import('../tgcloud/endpoints/saveSettings.js');
 function minimum(n,approval='manual'){sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify({...DEFAULTS,minMembers:n,approval}));}
 const pm=text=>({text,chat:{id:42,type:'private'},from:{id:42}});
 function seed(){sql.prepare("INSERT INTO list_chats(id,title,type,url,owner,updated) VALUES(-100123,'Canal teste','channel','https://t.me/canalteste',42,1)").run();}
@@ -51,6 +51,8 @@ test('edição do link no privado salva no chat selecionado',async()=>{seed();aw
 test('usuário sem administração não altera categoria',async()=>{seed();member='member';await callback(cb('cat:-100123:4',-100123));assert.equal(sql.prepare('SELECT category FROM list_chats').get().category,-1);assert.ok(calls.some(x=>x.name==='answerCallbackQuery'&&x.p.show_alert));});
 test('aprovação direta exige admin do bot e cadastro pendente',async()=>{seed();sql.exec("UPDATE list_chats SET category=0,status='pending'");await assert.rejects(()=>moderate({id:-100123,status:'approved'},{initData:{user:{id:42}}}));await moderate({id:-100123,status:'approved'},{initData:{user:{id:7595607953}}});assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'approved');await assert.rejects(()=>moderate({id:-100123,status:'rejected'},{initData:{user:{id:7595607953}}}));});
 test('rejeição direta não exige consertar um link inválido',async()=>{seed();sql.exec("UPDATE list_chats SET status='pending',url=''");await moderate({id:-100123,status:'rejected'},{initData:{user:{id:7595607953}}});assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'rejected');});
+test('aprovar pelo painel recupera cadastro rejeitado com dados válidos',async()=>{seed();sql.exec("UPDATE list_chats SET category=0,status='rejected',error='motivo antigo'");const r=await moderate({id:-100123,status:'approved'},{initData:{user:{id:7595607953}}});assert.equal(r.status,'approved');const c=sql.prepare('SELECT status,error FROM list_chats').get();assert.equal(c.status,'approved');assert.equal(c.error,'');});
+test('aprovar pelo painel não contorna banimento do dono',async()=>{minimum(0);seed();sql.exec("UPDATE list_chats SET category=0,status='pending'");sql.prepare('UPDATE list_settings SET value=? WHERE id=1').run(JSON.stringify({...DEFAULTS,bannedUsers:[42]}));await assert.rejects(()=>moderate({id:-100123,status:'approved'},{initData:{user:{id:7595607953}}}),/banido/);assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'pending');});
 
 test('bot adicionado rejeita abaixo do mínimo e não libera categorias',async()=>{minimum(101);await register({id:-100123,title:'Canal teste',type:'channel'},42);const c=sql.prepare('SELECT * FROM list_chats').get();assert.equal(c.status,'rejected');assert.match(c.error,/100.*101/);const screen=calls.find(c=>c.name==='sendMessage').p;assert.ok(screen.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='recheck:-100123'));assert.equal(screen.reply_markup.inline_keyboard.flat().some(b=>b.callback_data?.startsWith('cat:')),false);});
 test('igual ao mínimo libera cadastro; nova checagem pode recuperar rejeitado',async()=>{minimum(100);memberCount=99;await register({id:-100123,title:'Canal teste',type:'supergroup'},42);memberCount=100;await callback(cb('recheck:-100123',-100123));const c=sql.prepare('SELECT * FROM list_chats').get();assert.equal(c.status,'draft');assert.equal(c.error,'');assert.equal(calls.filter(c=>c.name==='getChatMemberCount').length,2);});
@@ -58,6 +60,16 @@ test('aprovação manual consulta contagem atual e rejeita se caiu abaixo',async
 test('aprovação manual aceita contagem exatamente igual',async()=>{minimum(100);seed();sql.exec("UPDATE list_chats SET category=0,status='pending'");await moderate({id:-100123,status:'approved'},{initData:{user:{id:7595607953}}});assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'approved');});
 test('aprovação automática e edição não contornam o mínimo',async()=>{minimum(101,'automatic');seed();sql.exec('UPDATE list_chats SET category=0');const c=sql.prepare('SELECT * FROM list_chats').get();assert.equal(await submit(c,42),'rejected');const r=await updateChat({id:-100123,status:'approved'},{initData:{user:{id:7595607953}}});assert.equal(r.status,'rejected');assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'rejected');});
 test('falha de contagem bloqueia aprovação sem rejeição falsa',async()=>{minimum(100);seed();sql.exec("UPDATE list_chats SET category=0,status='pending'");countError=true;await assert.rejects(()=>moderate({id:-100123,status:'approved'},{initData:{user:{id:7595607953}}}),/conferir os membros/);assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'pending');});
+
+test('botão de aprovar no log também respeita o mínimo de membros',async()=>{
+ minimum(100);seed();sql.exec("UPDATE list_chats SET category=0,status='pending'");memberCount=99;
+ calls=[];
+ await callback(cb('chat_adm:approve:-100123',-1001999999));
+ const answer=calls.find(c=>c.name==='answerCallbackQuery');
+ assert.ok(answer);
+ assert.match(answer.p.text,/Mínimo de membros/);
+ assert.equal(sql.prepare('SELECT status FROM list_chats').get().status,'rejected');
+});
 
 test('divulgações: só o admin salva, upsert mantém id e remoção apaga registro',async()=>{
  await assert.rejects(()=>saveAds({upsert:[]},{initData:{user:{id:42}}}));
@@ -76,8 +88,21 @@ test('divulgações: valida link, estilo, posição repetida e nome vazio',async
  await assert.rejects(()=>saveAds({upsert:[{title:'X',url:'https://t.me/aaaa',style:'rosa',row:0,col:0}]},admin),/Estilo/);
  await assert.rejects(()=>saveAds({upsert:[{title:'A',url:'https://t.me/aaaa',row:0,col:0},{title:'B',url:'https://t.me/bbbb',row:0,col:0}]},admin),/posição/);
  await assert.rejects(()=>saveAds({upsert:[{title:'',url:'https://t.me/aaaa',row:0,col:0}]},admin),/1 a 60/);
- await assert.rejects(()=>saveAds({upsert:[{title:'X',url:'https://t.me/aaaa',row:20,col:0}]},admin),/Posição/);
+ await assert.rejects(()=>saveAds({upsert:[{title:'X',url:'https://t.me/aaaa',row:1000,col:0}]},admin),/Posição/);
  assert.equal(sql.prepare('SELECT count(*) AS n FROM list_ads').get().n,0);
+});
+
+test('divulgações: aceita mais de 20 parcerias sem consumir posições da lista',async()=>{
+ const admin={initData:{user:{id:7595607953}}};
+ const rows=Array.from({length:21},(_,i)=>({
+  title:'Parceiro '+i,
+  url:'https://t.me/parceiro'+i,
+  row:16+Math.floor(i/5),
+  col:i%5
+ }));
+ await saveAds({upsert:rows},admin);
+ assert.equal(sql.prepare('SELECT count(*) AS n FROM list_ads').get().n,21);
+ assert.equal(sql.prepare('SELECT slot_row FROM list_ads ORDER BY slot_row DESC, slot_col DESC LIMIT 1').get().slot_row,20);
 });
 
 test('horários da aba nav:schedule refletem as configurações da dashboard',async()=>{
@@ -185,13 +210,22 @@ test('remover canal: exclui o registro permanentemente de list_chats',async()=>{
  assert.equal(row,undefined);
 });
 
-test('banir e desbanir usuário: suspende cadastros e bloqueia mensagens privadas',async()=>{
+test('banir e desbanir usuário: suspende cadastros, bloqueia mensagens e preserva agendamentos',async()=>{
  seed();
- sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(DEFAULTS));
+ const scheduleNextAt=Date.now()+3600000;
+ const removalNextAt=Date.now()+7200000;
+ const custom={...DEFAULTS,
+  schedule:{...DEFAULTS.schedule,enabled:true,nextAt:scheduleNextAt},
+  removalSchedule:{...DEFAULTS.removalSchedule,enabled:true,nextAt:removalNextAt}
+ };
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(custom));
 
  const banRes=await banUser({user:42,ban:true},{initData:{user:{id:7595607953}}});
  assert.equal(banRes.ok,true);
  assert.equal(banRes.banned,true);
+ let saved=JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id=1').get().value);
+ assert.equal(saved.schedule.nextAt,scheduleNextAt);
+ assert.equal(saved.removalSchedule.nextAt,removalNextAt);
 
  const chat=sql.prepare('SELECT status,error FROM list_chats WHERE owner=42').get();
  assert.equal(chat.status,'rejected');
@@ -206,11 +240,28 @@ test('banir e desbanir usuário: suspende cadastros e bloqueia mensagens privada
  const unbanRes=await banUser({user:42,ban:false},{initData:{user:{id:7595607953}}});
  assert.equal(unbanRes.ok,true);
  assert.equal(unbanRes.banned,false);
+ saved=JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id=1').get().value);
+ assert.equal(saved.schedule.nextAt,scheduleNextAt);
+ assert.equal(saved.removalSchedule.nextAt,removalNextAt);
 
  calls=[];
  await message(pm('/start'));
  const okMsg=calls.find(x=>x.name==='sendMessage').p;
  assert.match(okMsg.text,/👋 Olá/);
+});
+
+test('salvar configurações preserva o próximo envio e a próxima remoção',async()=>{
+ const scheduleNextAt=Date.now()+3600000;
+ const removalNextAt=Date.now()+7200000;
+ const custom={...DEFAULTS,
+  schedule:{...DEFAULTS.schedule,enabled:true,nextAt:scheduleNextAt},
+  removalSchedule:{...DEFAULTS.removalSchedule,enabled:true,nextAt:removalNextAt}
+ };
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(custom));
+ await saveSettings({settings:{...custom,buttonColor:'primary'},version:1},{initData:{user:{id:7595607953}}});
+ const saved=JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id=1').get().value);
+ assert.equal(saved.schedule.nextAt,scheduleNextAt);
+ assert.equal(saved.removalSchedule.nextAt,removalNextAt);
 });
 
 test('comandos /setadmin, /deladmin e /admins gerenciam administradores com sucesso',async()=>{
@@ -284,6 +335,106 @@ test('comandos /setadmin, /deladmin e /admins gerenciam administradores com suce
  const rowAfter = sql.prepare('SELECT value FROM list_settings WHERE id=1').get();
  const settingsAfter = JSON.parse(rowAfter.value);
  assert.equal(settingsAfter.admins.includes(123456789), false);
+});
+
+test('modo manutenção responde usuários comuns, silencia quando vazio e libera administradores', async () => {
+ const active={...DEFAULTS,maintenance:{enabled:true,message:'🛠️ <b>Voltamos já</b>'}};
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(active));
+
+ calls=[];
+ await message(pm('/start'));
+ let sentCalls=calls.filter(x=>x.name==='sendMessage');
+ assert.equal(sentCalls.length,1);
+ assert.match(sentCalls[0].p.text,/Voltamos já/);
+ assert.doesNotMatch(sentCalls[0].p.text,/Bem-vindo/);
+
+ calls=[];
+ await callback(cb('nav:help'));
+ const maintenanceAnswer=calls.find(x=>x.name==='answerCallbackQuery');
+ assert.ok(maintenanceAnswer);
+ assert.match(maintenanceAnswer.p.text,/Voltamos já/);
+ assert.equal(calls.filter(x=>x.name==='editMessageText').length,0);
+
+ // Administradores continuam podendo usar o bot durante a manutenção.
+ calls=[];
+ await message({text:'/start',chat:{id:7595607953,type:'private'},from:{id:7595607953}});
+ sentCalls=calls.filter(x=>x.name==='sendMessage');
+ assert.equal(sentCalls.length,1);
+ assert.match(sentCalls[0].p.text,/👋 Olá/);
+
+ // Mensagem vazia = modo silencioso.
+ const silent={...active,maintenance:{enabled:true,message:''}};
+ sql.prepare('UPDATE list_settings SET value=? WHERE id=1').run(JSON.stringify(silent));
+ calls=[];
+ await message(pm('/start'));
+ await callback(cb('nav:help'));
+ assert.equal(calls.filter(x=>x.name==='sendMessage').length,0);
+ const silentAnswer=calls.find(x=>x.name==='answerCallbackQuery');
+ assert.ok(silentAnswer);
+ assert.equal(silentAnswer.p.text,undefined);
+});
+
+test('somente administradores ativam o modo manutenção', async () => {
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(DEFAULTS));
+ const adminMsg=text=>({text,chat:{id:7595607953,type:'private'},from:{id:7595607953}});
+
+ await assert.rejects(
+  ()=>saveSettings({settings:{...DEFAULTS,maintenance:{enabled:true,message:'X'}},version:1},{initData:{user:{id:42}}}),
+  /administradores/
+ );
+
+ calls=[];
+ await message(pm('/manutencao on'));
+ assert.match(calls.find(x=>x.name==='sendMessage').p.text,/Acesso negado/);
+ assert.equal(JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id=1').get().value).maintenance.enabled,false);
+
+ calls=[];
+ await message(adminMsg('/manutencao on'));
+ assert.match(calls.find(x=>x.name==='sendMessage').p.text,/ativado/i);
+ let saved=JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id=1').get().value);
+ assert.equal(saved.maintenance.enabled,true);
+
+ calls=[];
+ await message(adminMsg('/manutencao msg 🛠️ <b>Voltamos já</b>'));
+ saved=JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id=1').get().value);
+ assert.equal(saved.maintenance.message,'🛠️ <b>Voltamos já</b>');
+
+ calls=[];
+ await message(adminMsg('/manutencao off'));
+ saved=JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id=1').get().value);
+ assert.equal(saved.maintenance.enabled,false);
+});
+
+test('modo manutenção pausa envios automáticos e bloqueia novas rodadas', async () => {
+ const active={...DEFAULTS,maintenance:{enabled:true,message:'X'},schedule:{...DEFAULTS.schedule,enabled:true,nextAt:Date.now()-1000}};
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(active));
+ seed();
+ calls=[];
+ const result=await processQueue({scheduled:true});
+ assert.equal(result.maintenance,true);
+ assert.equal(calls.filter(x=>x.name==='sendMessage').length,0);
+ await assert.rejects(()=>createRound(),/manutenção/i);
+});
+
+test('modo manutenção não registra novos chats de usuários comuns', async () => {
+ const active={...DEFAULTS,maintenance:{enabled:true,message:'X'}};
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(active));
+ calls=[];
+ await myChatMember({
+  chat:{id:-100123,type:'channel',title:'Canal Teste'},
+  from:{id:42},
+  new_chat_member:{status:'administrator'}
+ });
+ assert.equal(sql.prepare('SELECT * FROM list_chats').get(),undefined);
+ assert.equal(calls.length,0);
+
+ // Um proprietário pode continuar preparando o chat durante a manutenção.
+ await myChatMember({
+  chat:{id:-100124,type:'channel',title:'Canal do Owner'},
+  from:{id:7595607953},
+  new_chat_member:{status:'administrator'}
+ });
+ assert.ok(sql.prepare('SELECT * FROM list_chats WHERE id=-100124').get());
 });
 
 test('novas categorias, layout 2 por linha e botões de cancelar no canal', async () => {

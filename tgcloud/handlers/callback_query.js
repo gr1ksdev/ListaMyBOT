@@ -1,14 +1,25 @@
 import {membershipBlocked} from '../lib/membership.js';
 import { api, db } from 'sdk';
 import { CATEGORIES } from '../lib/domain.js';
-import { getChat, putState, isAdmin, state } from '../lib/store.js';
+import { config, getChat, putState, isAdmin, state } from '../lib/store.js';
 import { chatAdmin, menu, submit, register, closeMenu } from '../lib/registration.js';
 import { privateScreen, escHtml } from '../lib/navigation.js';
 import { submitPromotion, approvePromotion, rejectPromotion } from '../lib/promotions.js';
 import { formatChatSubmissionMessage, chatSubmissionKeyboard } from '../lib/chat_logs.js';
 import { startTicketService, closeTicket, reopenTicket } from '../lib/support.js';
+import { trackUser } from '../lib/broadcast.js';
+import { approveChat } from '../lib/moderation.js';
+import { maintenanceGate, maintenanceAlertText } from '../lib/maintenance.js';
 export default async function(q){
  if(!q.message)return;
+ const {settings}=await config();
+ const maintenance=maintenanceGate(settings,q.from?.id);
+ if(maintenance.blocked){
+  const text=maintenanceAlertText(maintenance.message);
+  try{await api.answerCallbackQuery({callback_query_id:q.id,...(text?{text,show_alert:true}:{})});}catch{}
+  return;
+ }
+ if(q.from && !q.from.is_bot) await trackUser(q.from);
  const [action,raw,value]=String(q.data||'').split(':');const target=q.message.chat.id;const user=q.from.id;
  if(!['nav','cfg','cats','cat','link','submit','recheck','promo','chat_adm','cancel','ticket','support'].includes(action))return;
  let answered=false;const answer=async(text,alert=false)=>{if(!answered){await api.answerCallbackQuery({callback_query_id:q.id,...(text?{text,show_alert:alert}:{})});answered=true;}};
@@ -50,54 +61,64 @@ export default async function(q){
   if(!c){await answer('Cadastro não encontrado.',true);return;}
   let memberCount=0;
   try{memberCount=await api.getChatMemberCount({chat_id:chatId});}catch{}
-  if(raw==='approve'){
-   await answer('Aprovando cadastro...');
-   await db.run("UPDATE list_chats SET status='approved', error='', updated=:n WHERE id=:id",{':n':Date.now(),':id':chatId});
-   c.status='approved';
+  const updateLogAndOwner=async(status,reason='')=>{
+   c.status=status;
+   let text=formatChatSubmissionMessage(c,memberCount,c.owner,status,q.from);
+   if(status==='rejected'&&reason)text+=`\n\n<b>Motivo:</b> ${escHtml(reason)}`;
    try{
     await api.editMessageText({
      chat_id:target,
      message_id:q.message.message_id,
-     text:formatChatSubmissionMessage(c,memberCount,c.owner,'approved',q.from),
+     text,
      parse_mode:'HTML',
      disable_web_page_preview:true,
-     reply_markup:chatSubmissionKeyboard(chatId,'approved')
+     reply_markup:chatSubmissionKeyboard(chatId,status)
     });
    }catch(e){console.warn('Erro ao atualizar mensagem de log:',e);}
    if(c.owner){
     try{
-     await api.sendMessage({
-      chat_id:c.owner,
-      text:`🎉 <b>Boas notícias!</b>\n\nSeu canal/grupo <b>${escHtml(c.title)}</b> foi aprovado e agora faz parte da nossa lista oficial!`,
-      parse_mode:'HTML'
-     });
+     if(status==='approved'){
+      await api.sendMessage({
+       chat_id:c.owner,
+       text:`🎉 <b>Boas notícias!</b>\n\nSeu canal/grupo <b>${escHtml(c.title)}</b> foi aprovado e agora faz parte da nossa lista oficial!`,
+       parse_mode:'HTML'
+      });
+     }else if(status==='rejected'){
+      await api.sendMessage({
+       chat_id:c.owner,
+       text:`⚠️ <b>Aviso sobre seu cadastro:</b>\n\nA solicitação de entrada de <b>${escHtml(c.title)}</b> na lista foi recusada pelos moderadores.`+(reason?`\n\n<b>Motivo:</b> ${escHtml(reason)}`:''),
+       parse_mode:'HTML'
+      });
+     }
     }catch{}
    }
+  };
+  if(raw==='approve'){
+   let result;
+   try{
+    const settings=(await config()).settings;
+    result=await approveChat(c,settings);
+   }catch(e){
+    await answer(e.message||'Não foi possível aprovar o cadastro.',true);
+    return;
+   }
+   if(result.alreadyApproved){
+    await answer('Este cadastro já está aprovado.');
+    return;
+   }
+   if(!result.ok){
+    await answer(result.reason||'Cadastro rejeitado automaticamente.',true);
+    await updateLogAndOwner('rejected',result.reason||'');
+    return;
+   }
+   await answer('Cadastro aprovado!');
+   await updateLogAndOwner('approved');
    return;
   }
   if(raw==='reject'){
    await answer('Rejeitando cadastro...');
    await db.run("UPDATE list_chats SET status='rejected', updated=:n WHERE id=:id",{':n':Date.now(),':id':chatId});
-   c.status='rejected';
-   try{
-    await api.editMessageText({
-     chat_id:target,
-     message_id:q.message.message_id,
-     text:formatChatSubmissionMessage(c,memberCount,c.owner,'rejected',q.from),
-     parse_mode:'HTML',
-     disable_web_page_preview:true,
-     reply_markup:chatSubmissionKeyboard(chatId,'rejected')
-    });
-   }catch(e){console.warn('Erro ao atualizar mensagem de log:',e);}
-   if(c.owner){
-    try{
-     await api.sendMessage({
-      chat_id:c.owner,
-      text:`⚠️ <b>Aviso sobre seu cadastro:</b>\n\nA solicitação de entrada de <b>${escHtml(c.title)}</b> na lista foi recusada pelos moderadores.`,
-      parse_mode:'HTML'
-     });
-    }catch{}
-   }
+   await updateLogAndOwner('rejected');
    return;
   }
   return;

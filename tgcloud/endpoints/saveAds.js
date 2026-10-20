@@ -16,7 +16,7 @@ export default async function(input,ctx){
  if(!title||title.length>60)throw new EndpointError('Nome do botão de divulgação: use de 1 a 60 caracteres.');
  if(!validLink(a.url))throw new EndpointError(`Informe um link do Telegram (https://t.me/…) para “${title.slice(0,30)}”.`);
  if(a.style&&!AD_STYLES.includes(a.style))throw new EndpointError(`Estilo de cor inválido para “${title.slice(0,30)}”.`);
- if(!Number.isSafeInteger(a.row)||a.row<0||a.row>19||!Number.isSafeInteger(a.col)||a.col<0||a.col>4)throw new EndpointError(`Posição inválida para “${title.slice(0,30)}”.`);
+ if(!Number.isSafeInteger(a.row)||a.row<0||a.row>999||!Number.isSafeInteger(a.col)||a.col<0||a.col>4)throw new EndpointError(`Posição inválida para “${title.slice(0,30)}”.`);
  const key=a.row+'_'+a.col;if(seen.has(key))throw new EndpointError('Não repita a mesma posição em duas divulgações.');seen.add(key);
  }
  const now=Date.now();

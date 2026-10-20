@@ -348,6 +348,45 @@ test('não-administrador não consegue clicar em responder ou encerrar chamado n
   assert.equal(ticketCheck.status, 'pending', 'status não deve mudar');
 });
 
+test('membro comum não consegue responder no tópico de suporte; administrador consegue', async () => {
+  const code = 'TK-TOPIC';
+  sql.prepare(`
+    INSERT INTO list_tickets (
+      id, code, user_id, user_name, user_username, status, initial_message,
+      log_chat_id, thread_id, created, updated
+    ) VALUES (
+      't3', ?, 42, 'Gabriel', 'gabriel_user', 'open', 'Dúvida',
+      -1001234567890, 777, 1000, 1000
+    )
+  `).run(code);
+
+  calls = [];
+  await message({
+    text: 'Mensagem de um membro comum',
+    chat: { id: -1001234567890, type: 'supergroup' },
+    message_thread_id: 777,
+    from: { id: 99999, first_name: 'Intruso' }
+  });
+  assert.equal(
+    calls.some(c => c.name === 'sendMessage' && c.p.chat_id === 42),
+    false,
+    'mensagem de membro comum não deve chegar ao usuário'
+  );
+  assert.equal(sql.prepare('SELECT status FROM list_tickets WHERE code = ?').get(code).status, 'open');
+
+  calls = [];
+  await message({
+    text: 'Resposta do administrador',
+    chat: { id: -1001234567890, type: 'supergroup' },
+    message_thread_id: 777,
+    from: { id: OWNER, first_name: 'Admin Gabriel', username: 'admin_gabriel' }
+  });
+  assert.ok(
+    calls.some(c => c.name === 'sendMessage' && c.p.chat_id === 42),
+    'mensagem de administrador deve ser repassada ao usuário'
+  );
+});
+
 test('usuário encerra chamado enviando comando /encerrar no privado', async () => {
   const code = 'TK-CMD1';
   sql.prepare(`

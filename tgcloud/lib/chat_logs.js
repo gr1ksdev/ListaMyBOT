@@ -1,6 +1,6 @@
 import { api, db } from 'sdk';
 import { APP_URL, CATEGORIES } from './domain.js';
-import { config } from './store.js';
+import { config, putState, state } from './store.js';
 import { escHtml } from './navigation.js';
 
 export async function ensureChatsTopic(logChatId) {
@@ -138,7 +138,7 @@ export async function sendChatSubmissionLog(c, actor) {
       if (topicRes.ok && topicRes.topicId) {
         topicId = topicRes.topicId;
         cfg.settings.chatsLogTopic = topicId;
-        await db.run('UPDATE list_settings SET value=:v WHERE id=1', { ':v': JSON.stringify(cfg.settings) });
+        await db.run('UPDATE list_settings SET value=:v,version=version+1 WHERE id=1', { ':v': JSON.stringify(cfg.settings) });
       }
     } catch (e) {
       console.warn('Erro ao criar tópico de cadastros pendentes:', e);
@@ -164,9 +164,67 @@ export async function sendChatSubmissionLog(c, actor) {
       disable_web_page_preview: true,
       reply_markup: replyMarkup
     });
+    try {
+      await putState(`chat_log:${c.id}`, {
+        chat_id: logChat,
+        message_id: sent.message_id,
+        thread_id: topicId || null
+      });
+    } catch {}
     return sent;
   } catch (err) {
     console.warn('Falha ao enviar solicitação para o canal de logs:', err);
     return null;
   }
+}
+
+// Notify the owner when a moderator acts outside the Telegram log message.
+// Failures here must never undo or block the moderation itself.
+export async function notifyChatOwner(c, status, reason = '', reviewer = null) {
+  if (!c?.owner || Number(c.owner) <= 0) return;
+  const title = escHtml(c.display || c.title || 'seu canal/grupo');
+  let text;
+  if (status === 'approved') {
+    text = `🎉 <b>Boas notícias!</b>\n\nSeu canal/grupo <b>${title}</b> foi aprovado e agora faz parte da nossa lista oficial!`;
+  } else if (status === 'rejected') {
+    text = `⚠️ <b>Aviso sobre seu cadastro:</b>\n\nA solicitação de entrada de <b>${title}</b> na lista foi recusada pelos moderadores.` +
+      (reason ? `\n\n<b>Motivo:</b> ${escHtml(reason)}` : '');
+  } else if (status === 'pending') {
+    text = `⏸ <b>Seu cadastro voltou para análise.</b>\n\nO canal/grupo <b>${title}</b> foi desaprovado e está aguardando uma nova revisão dos moderadores.`;
+  } else {
+    return;
+  }
+  try {
+    await api.sendMessage({ chat_id: c.owner, text, parse_mode: 'HTML' });
+  } catch {}
+}
+
+// Update the original pending-log message when moderation happens in the
+// Mini App. Old logs without a stored location simply skip this step.
+export async function updateChatSubmissionLog(c, status, reviewer = null, reason = '') {
+  let location;
+  try {
+    location = await state(`chat_log:${c.id}`, null);
+  } catch {
+    return;
+  }
+  if (!location?.chat_id || !location?.message_id) return;
+
+  let memberCount = 0;
+  try {
+    memberCount = await api.getChatMemberCount({ chat_id: c.id });
+  } catch {}
+
+  let text = formatChatSubmissionMessage(c, memberCount, c.owner, status, reviewer);
+  if (status === 'rejected' && reason) text += `\n\n<b>Motivo:</b> ${escHtml(reason)}`;
+  try {
+    await api.editMessageText({
+      chat_id: location.chat_id,
+      message_id: location.message_id,
+      text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: chatSubmissionKeyboard(c.id, status)
+    });
+  } catch {}
 }

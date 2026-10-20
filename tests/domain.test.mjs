@@ -1,5 +1,5 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
-import {DEFAULTS,validateSettings,nextTime,makePages,permissionErrors,validLink} from '../tgcloud/lib/domain.js';
+import {DEFAULTS,DEFAULT_MAINTENANCE_MESSAGE,validateSettings,nextTime,makePages,permissionErrors,validLink} from '../tgcloud/lib/domain.js';
 test('horários fixos usam UTC−3 e avançam ao próximo dia',()=>{const now=Date.parse('2026-10-13T23:00:00-03:00');assert.equal(new Date(nextTime({enabled:true,mode:'fixed',times:['09:00','20:00']},now)).toISOString(),'2026-10-14T12:00:00.000Z');});
 test('intervalo arbitrário de 90 minutos preserva a duração',()=>assert.equal(nextTime({enabled:true,mode:'interval',minutes:90},1000),5401000));
 test('validação rejeita configurações inválidas',()=>{assert.throws(()=>validateSettings({...DEFAULTS,columns:8}));assert.throws(()=>validateSettings({...DEFAULTS,schedule:{...DEFAULTS.schedule,times:['25:00']}}));assert.throws(()=>validateSettings({...DEFAULTS,admins:[NaN]}));});
@@ -40,6 +40,52 @@ test('limites do padrão e migração das colunas anteriores',()=>{
 });
 
 test('mínimo de membros aceita zero e inteiros e mantém compatibilidade',()=>{assert.equal(validateSettings({...DEFAULTS,minMembers:undefined}).minMembers,0);assert.equal(validateSettings({...DEFAULTS,minMembers:100}).minMembers,100);for(const minMembers of [-1,1.1,'100',100000001])assert.throws(()=>validateSettings({...DEFAULTS,minMembers}));});
+
+test('modo manutenção valida estado e permite mensagem vazia para silêncio',()=>{
+ const saved=validateSettings({...DEFAULTS,maintenance:{enabled:true,message:'  <b>Voltamos já</b>  '}});
+ assert.equal(saved.maintenance.enabled,true);
+ assert.equal(saved.maintenance.message,'<b>Voltamos já</b>');
+ assert.equal(validateSettings({...DEFAULTS,maintenance:{enabled:false,message:''}}).maintenance.message,'');
+ assert.equal(validateSettings({...DEFAULTS}).maintenance.message,DEFAULT_MAINTENANCE_MESSAGE);
+ assert.throws(()=>validateSettings({...DEFAULTS,maintenance:{enabled:'yes'}}),/manutenção/i);
+ assert.throws(()=>validateSettings({...DEFAULTS,maintenance:{enabled:true,message:123}}),/manutenção/i);
+ assert.throws(()=>validateSettings({...DEFAULTS,maintenance:{enabled:true,message:'x'.repeat(3501)}}),/3.500/);
+
+ // Um painel antigo que não envia o campo não desativa a manutenção sem querer.
+ const previous=validateSettings({...DEFAULTS,maintenance:{enabled:true,message:'X'}});
+ const {maintenance,...withoutMaintenance}=previous;
+ const savedWithout=validateSettings({...withoutMaintenance,buttonColor:'primary'},Date.now(),previous);
+ assert.deepEqual(savedWithout.maintenance,previous.maintenance);
+});
+
+test('salvar configurações não adia o próximo envio nem a próxima remoção',()=>{
+ const now=Date.parse('2026-10-13T12:00:00-03:00');
+ const scheduleNextAt=now+3600000;
+ const removalNextAt=now+7200000;
+ const previous={...DEFAULTS,
+  schedule:{...DEFAULTS.schedule,enabled:true,nextAt:scheduleNextAt},
+  removalSchedule:{...DEFAULTS.removalSchedule,enabled:true,nextAt:removalNextAt}
+ };
+ const input={...previous,buttonColor:'primary'};
+ const saved=validateSettings(input,now,previous);
+ assert.equal(saved.schedule.nextAt,scheduleNextAt);
+ assert.equal(saved.removalSchedule.nextAt,removalNextAt);
+
+ const changedSchedule=validateSettings({...input,schedule:{...input.schedule,times:['10:00']}},now,previous);
+ assert.equal(changedSchedule.schedule.nextAt,nextTime({...input.schedule,times:['10:00']},now));
+ assert.equal(changedSchedule.removalSchedule.nextAt,removalNextAt);
+
+ const disabledRemoval=validateSettings({...input,removalSchedule:{...input.removalSchedule,enabled:false}},now,previous);
+ assert.equal(disabledRemoval.removalSchedule.nextAt,0);
+});
+
+test('rodapé usa o username real do bot quando informado',()=>{
+ const chats=[{id:1,position:0,title:'Canal A',url:'https://t.me/canala',status:'approved',category:0}];
+ const pages=makePages(chats,{...DEFAULTS,footerButtons:true},0,[],'OutroBot');
+ const footer=pages[0].reply_markup.inline_keyboard.at(-1)[0];
+ assert.equal(footer.text,'Adicionar no meu Canal/Grupo');
+ assert.match(footer.url,/^https:\/\/t\.me\/OutroBot\?startgroup=true/);
+});
 
 test('cores dos botões: global, tipo canal/grupo e individual com precedência correta',()=>{
  const chats=[
@@ -155,18 +201,15 @@ test('duas divulgações com início e fim ativos distribui a 1ª no início e a
  assert.equal(rows[rows.length - 1][0].text, 'Parceria Beta');
 });
 
-test('botões default no fim da lista: Add-me em C/G e Canal Oficial', () => {
+test('botão default no fim da lista: Adicionar no meu Canal/Grupo', () => {
  const chats = [{ id: 1, position: 0, title: 'Canal 1', url: 'https://t.me/canal1', status: 'approved', category: 0 }];
  const pages = makePages(chats, DEFAULTS);
  const rows = pages[0].reply_markup.inline_keyboard;
  const footerRow = rows[rows.length - 1];
- assert.equal(footerRow.length, 2);
- assert.equal(footerRow[0].text, 'Add-me em C/G');
- assert.equal(footerRow[0].style, 'primary');
+ assert.equal(footerRow.length, 1);
+ assert.equal(footerRow[0].text, 'Adicionar no meu Canal/Grupo');
+ assert.equal(footerRow[0].style, 'success');
  assert.equal(footerRow[0].url, 'https://t.me/ListaMyBOT?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users');
- assert.equal(footerRow[1].text, 'Canal Oficial');
- assert.equal(footerRow[1].style, 'success');
- assert.equal(footerRow[1].url, 'https://t.me/ChannelLogBM');
 });
 
 

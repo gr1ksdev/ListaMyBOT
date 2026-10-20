@@ -56,4 +56,11 @@ export const tickets = table('list_tickets', {
   closed_at: integer('closed_at'),
   closed_by: integer('closed_by')
 });
+export const users = table('list_users', {
+  id: integer('id').primaryKey(),
+  first_name: text('first_name').notNull().default(''),
+  username: text('username').notNull().default(''),
+  created: integer('created').notNull().default(0),
+  updated: integer('updated').notNull().default(0)
+});
 

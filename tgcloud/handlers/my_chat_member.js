@@ -1,9 +1,20 @@
 import { db, api } from 'sdk';
 import { register } from '../lib/registration.js';
 import { config } from '../lib/store.js';
+import { maintenanceGate } from '../lib/maintenance.js';
 
 export default async function(u){
  if(!['group','supergroup','channel'].includes(u.chat?.type))return;
+ const { settings } = await config();
+ const maintenance = maintenanceGate(settings, u.from?.id);
+ if (maintenance.blocked) {
+  // Keep the local status accurate when the bot is removed, but do not run
+  // registration or send messages while maintenance mode is active.
+  if (!['administrator', 'member', 'restricted'].includes(u.new_chat_member?.status)) {
+   await db.run("UPDATE list_chats SET status='paused',error='Bot removido ou sem administração',updated=:n WHERE id=:id",{':n':Date.now(),':id':u.chat.id});
+  }
+  return;
+ }
  if(u.new_chat_member?.status!=='administrator'){
   if(u.new_chat_member?.status==='member'){
    const me=await api.getMe();
@@ -22,7 +33,6 @@ export default async function(u){
   return;
  }
 
- const {settings}=await config();
  const minimum=settings.minMembers??0;
  if(minimum>0){
   try{

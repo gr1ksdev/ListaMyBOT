@@ -3,7 +3,8 @@ import { requireAdmin, getChat } from '../lib/store.js';
 import { AD_STYLES } from '../lib/domain.js';
 
 export default async function(input, ctx) {
- const { settings } = await requireAdmin(ctx);
+ const auth = await requireAdmin(ctx);
+ const { settings } = auth;
  const id = Number(input.id);
  const c = await getChat(id);
  if (!c) throw new EndpointError('Participante não encontrado.');
@@ -14,6 +15,11 @@ export default async function(input, ctx) {
  } else {
   delete settings.chatColors[id];
  }
- await db.run('UPDATE list_settings SET value=:v WHERE id=1', { ':v': JSON.stringify(settings) });
+ const expected = Number.isSafeInteger(input.version) ? input.version : auth.version;
+ const result = await db.run(
+  'UPDATE list_settings SET value=:v,version=version+1 WHERE id=1 AND version=:version',
+  { ':v': JSON.stringify(settings), ':version': expected }
+ );
+ if (!result.rowsAffected) throw new EndpointError('As configurações mudaram. Atualize o painel e tente novamente.');
  return { ok: true, style };
 }

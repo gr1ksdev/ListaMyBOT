@@ -1,15 +1,28 @@
 import { api, db } from 'sdk';
-import { APP_URL, validLink, OWNER, OWNERS, isOwner, validateSettings } from '../lib/domain.js';
+import { APP_URL, validLink, OWNER, OWNERS, isOwner, normalizeMaintenance, validateSettings } from '../lib/domain.js';
 import { getChat, isAdmin, state, putState, isBanned, config } from '../lib/store.js';
 import { register, menu, chatAdmin } from '../lib/registration.js';
 import { screen, privateScreen, escHtml } from '../lib/navigation.js';
 import { parsePromoPayload, isPayloadLike, submitPromotion, ensurePromoTopic, promoTemplate, updatePromoConfig } from '../lib/promotions.js';
 import { ensureChatsTopic } from '../lib/chat_logs.js';
 import { getTicketByThreadId, getActiveTicketForUser, createTicket, closeTicket, relayUserMessage, relayAdminMessage, ensureSupportTopic } from '../lib/support.js';
+import { parseSendCommand, handleSendCommand, getSendHelpText, trackUser } from '../lib/broadcast.js';
+import { maintenanceGate, sendMaintenanceNotice } from '../lib/maintenance.js';
 // Explicit commands should answer at the bottom of the conversation. Inline
 // callbacks keep editing their current menu, without producing new messages.
 export default async function(m){
  const rawText = (m.text || m.caption || '').trim();
+ const { settings } = await config();
+ const maintenance = maintenanceGate(settings, m.from?.id);
+ if (maintenance.blocked) {
+  // Do not flood groups/channels: outside private chats, only answer commands.
+  const isPrivate = m.chat?.type === 'private';
+  const isGroupCommand = ['group', 'supergroup'].includes(m.chat?.type) && rawText.startsWith('/');
+  if (isPrivate || isGroupCommand) {
+   await sendMaintenanceNotice(m.chat.id, maintenance.message);
+  }
+  return;
+ }
  const command = m.chat?.type === 'private' && rawText.startsWith('/');
  if(!command)return handleMessage(m);
  const key=`private_menu:${m.from.id}`;
@@ -28,11 +41,15 @@ export default async function(m){
 }
 async function handleMessage(m){
  const text=(m.text||m.caption||'').trim();const [word,...args]=text.split(/\s+/);const cmd=word.split('@')[0].toLowerCase();const user=m.from?.id;
+ if (m.from && !m.from.is_bot) await trackUser(m.from);
  if(m.migrate_to_chat_id){await db.run('UPDATE list_chats SET id=:new,type=\'supergroup\' WHERE id=:old',{':new':m.migrate_to_chat_id,':old':m.chat.id});return;}
  const privateChat=m.chat.type==='private';
  if (!privateChat && m.message_thread_id && !m.from?.is_bot) {
   const ticket = await getTicketByThreadId(m.message_thread_id);
   if (ticket && ticket.log_chat_id === m.chat.id) {
+   // Only administrators of the log group may talk to the user or close a ticket.
+   // Being able to post in the support topic is not enough.
+   if (!m.from || m.from.is_bot || !await chatAdmin(m.chat.id, m.from.id)) return;
    if (['/encerrar', '/fecharticket', '/fechar'].includes(cmd)) {
     await closeTicket(ticket.code, m.from, 'Encerrado pelo moderador via comando');
     return;
@@ -179,6 +196,73 @@ async function handleMessage(m){
   });
   return;
  }
+ if (cmd === '/manutencao' || cmd === '/maintenance') {
+  if (!await isAdmin(user)) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: '🚫 <b>Acesso negado:</b> apenas administradores podem ativar ou desativar o modo manutenção.',
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  const c = await config();
+  const current = normalizeMaintenance(c.settings.maintenance);
+  const sub = (args[0] || '').toLowerCase();
+  const usage = `🛠️ <b>Modo Manutenção</b>\n\n` +
+   `• <code>/manutencao on</code> — ativar\n` +
+   `• <code>/manutencao off</code> — desativar\n` +
+   `• <code>/manutencao msg &lt;texto&gt;</code> — definir a mensagem automática\n` +
+   `• <code>/manutencao status</code> — consultar o estado atual\n\n` +
+   `<i>Uma mensagem vazia deixa o bot em silêncio durante a manutenção.</i>`;
+  if (!sub || sub === 'status') {
+   const messageText = current.message.trim()
+    ? `<blockquote>${escHtml(current.message)}</blockquote>`
+    : '<i>🔇 Nenhuma mensagem configurada (bot silencioso).</i>';
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `🛠️ <b>Modo Manutenção: ${current.enabled ? 'ATIVADO' : 'DESATIVADO'}</b>\n\n` +
+     `<b>Mensagem automática:</b>\n${messageText}\n\n${usage}`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  let next = null;
+  let confirmation = '';
+  if (['on', 'ativar', 'ligar'].includes(sub)) {
+   next = { ...current, enabled: true };
+   confirmation = '✅ <b>Modo manutenção ativado.</b>\n\nUsuários comuns não serão atendidos' +
+    (current.message.trim() ? ' e receberão a mensagem configurada.' : ' (bot silencioso).') +
+    '\n\n<i>Administradores continuam com acesso ao painel e aos comandos.</i>';
+  } else if (['off', 'desativar', 'desligar'].includes(sub)) {
+   next = { ...current, enabled: false };
+   confirmation = '✅ <b>Modo manutenção desativado.</b>\n\nO bot voltou a responder normalmente.';
+  } else if (['msg', 'mensagem'].includes(sub)) {
+   const message = text.slice(word.length).trim().replace(/^(msg|mensagem)\b\s*/i, '').trim();
+   next = { ...current, message };
+   confirmation = '✅ <b>Mensagem de manutenção atualizada.</b>\n\n' +
+    (message ? `<blockquote>${escHtml(message)}</blockquote>` : '<i>🔇 Mensagem vazia: o bot ficará silencioso durante a manutenção.</i>');
+  } else {
+   await api.sendMessage({ chat_id: m.chat.id, text: usage, parse_mode: 'HTML' });
+   return;
+  }
+  const updated = validateSettings({ ...c.settings, maintenance: next }, Date.now(), c.settings);
+  let result;
+  if (c.version === 0) {
+   result = await db.run('INSERT INTO list_settings(id,value,version) VALUES(1,:v,1) ON CONFLICT(id) DO NOTHING', { ':v': JSON.stringify(updated) });
+  } else {
+   result = await db.run('UPDATE list_settings SET value=:v,version=version+1 WHERE id=1 AND version=:version', { ':v': JSON.stringify(updated), ':version': c.version });
+  }
+  if (!result.rowsAffected) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: '⚠️ <b>As configurações mudaram.</b>\n\nAtualize o painel e tente novamente.',
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  await api.sendMessage({ chat_id: m.chat.id, text: confirmation, parse_mode: 'HTML' });
+  return;
+ }
  if (cmd === '/setadmin' || cmd === '/addadmin') {
   if (!isOwner(user)) {
    await api.sendMessage({
@@ -235,7 +319,7 @@ async function handleMessage(m){
    return;
   }
   const newAdmins = [...new Set([...OWNERS, ...currentAdmins, targetId])];
-  const updated = validateSettings({ ...c.settings, admins: newAdmins });
+  const updated = validateSettings({ ...c.settings, admins: newAdmins }, Date.now(), c.settings);
   if (c.version === 0) {
    await db.run('INSERT INTO list_settings(id, value, version) VALUES(1, :v, 1) ON CONFLICT(id) DO UPDATE SET value=excluded.value', { ':v': JSON.stringify(updated) });
   } else {
@@ -292,7 +376,7 @@ async function handleMessage(m){
    return;
   }
   const newAdmins = currentAdmins.filter(id => id !== targetId);
-  const updated = validateSettings({ ...c.settings, admins: newAdmins });
+  const updated = validateSettings({ ...c.settings, admins: newAdmins }, Date.now(), c.settings);
   await db.run('UPDATE list_settings SET value=:v, version=version+1 WHERE id=1', { ':v': JSON.stringify(updated) });
   await api.sendMessage({
    chat_id: m.chat.id,
@@ -315,6 +399,38 @@ async function handleMessage(m){
          `\n\n<i>Gerenciamento exclusivo dos proprietários.</i>`,
    parse_mode: 'HTML'
   });
+  return;
+ }
+ const parsedSend = parseSendCommand(cmd, args, text);
+ if (parsedSend.isSend) {
+  if (!await isAdmin(user)) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    ...(m.message_thread_id ? { message_thread_id: m.message_thread_id } : {}),
+    text: '🚫 <b>Acesso negado:</b> apenas administradores do bot podem utilizar comandos de envio e transmissão.',
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  if (parsedSend.isHelp) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    ...(m.message_thread_id ? { message_thread_id: m.message_thread_id } : {}),
+    text: getSendHelpText(),
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  if (parsedSend.isInvalid) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    ...(m.message_thread_id ? { message_thread_id: m.message_thread_id } : {}),
+    text: `⚠️ <b>Uso incorreto:</b> destino <code>${escHtml(parsedSend.rawArg)}</code> não reconhecido.\n\nEnvie <code>/send</code> para consultar as instruções de uso.`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  await handleSendCommand(m, parsedSend);
   return;
  }
  if(privateChat){

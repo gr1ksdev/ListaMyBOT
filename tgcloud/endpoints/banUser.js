@@ -26,7 +26,7 @@ export default async function(input, ctx) {
  const newSettings = validateSettings({
   ...settings,
   bannedUsers: updatedList
- });
+ }, Date.now(), settings);
 
  await db.run('UPDATE list_settings SET value=:v, version=:ver WHERE id=1', {
   ':v': JSON.stringify(newSettings),

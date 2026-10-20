@@ -81,6 +81,9 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
   };
 
   const handleModerate = async (id, status) => {
+    const label =
+      status === 'approved' ? 'aprovado' : status === 'disapproved' ? 'desaprovado' : 'rejeitado';
+
     if (isDemo) {
       const target = chats.find((c) => c.id === id);
       if (target) {
@@ -96,16 +99,20 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
           );
           return;
         }
-        target.status = status;
-        toast(`Canal ${status === 'approved' ? 'aprovado' : 'rejeitado'} (Demo)`, 'success');
+        target.status = status === 'disapproved' ? 'pending' : status;
+        toast(`Canal ${label} (Demo)`, 'success');
       }
       return;
     }
 
     try {
       haptic('light');
-      await callEndpoint('moderateChat', { id, status });
-      toast(`Canal ${status === 'approved' ? 'aprovado' : 'rejeitado'} com sucesso!`, 'success');
+      const res = await callEndpoint('moderateChat', { id, status });
+      if (status === 'approved' && res?.status === 'rejected') {
+        toast(res.reason || 'Cadastro rejeitado automaticamente.', 'error');
+      } else {
+        toast(`Canal ${label} com sucesso!`, 'success');
+      }
       onRefresh?.();
     } catch (err) {
       toast(err.message || 'Falha ao moderar canal', 'error');
@@ -124,7 +131,13 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
     try {
       haptic('medium');
       const res = await callEndpoint('approveUserChats', { owner });
-      toast(`Aprovados ${res.approved || 0} canais pendentes do usuário!`, 'success');
+      const approved = res?.count || 0;
+      toast(
+        approved
+          ? `Aprovados ${approved} canais pendentes do usuário!`
+          : res?.message || 'Nenhum canal pendente foi aprovado.',
+        approved ? 'success' : 'info'
+      );
       onRefresh?.();
     } catch (err) {
       toast(err.message || 'Falha ao aprovar canais do usuário', 'error');
@@ -139,7 +152,7 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
 
     try {
       haptic('heavy');
-      await callEndpoint('banUser', { owner, banned: willBan });
+      await callEndpoint('banUser', { user: owner, ban: willBan });
       toast(`Usuário ${willBan ? 'banido da rede' : 'desbanido'} com sucesso!`, 'success');
       onRefresh?.();
     } catch (err) {
@@ -184,11 +197,12 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
 
     try {
       haptic('selection');
-      await callEndpoint('setChatColor', { id, style: color });
+      await callEndpoint('setChatColor', { id, style: color, version: data?.version });
       toast('Cor do botão salva!', 'success');
       onRefresh?.();
     } catch (err) {
       toast(err.message || 'Falha ao salvar cor', 'error');
+      onRefresh?.();
     }
   };
 
@@ -209,16 +223,18 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
       haptic('medium');
       await callEndpoint('updateChat', {
         id: editingChat.id,
-        title: editingChat.title,
+        display: editingChat.display ?? '',
         url: editingChat.url,
         category: editingChat.category,
         style: editingChat.style,
+        version: data?.version,
       });
       toast('Dados do canal atualizados!', 'success');
       setEditingChat(null);
       onRefresh?.();
     } catch (err) {
       toast(err.message || 'Falha ao atualizar canal', 'error');
+      onRefresh?.();
     } finally {
       setSavingAction(false);
     }
@@ -540,11 +556,23 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
                         {isOwnerBanned ? 'Desbanir Usuário' : 'Banir Usuário'}
                       </Button>
 
-                      {chat.status === 'approved' ? (
+                      {chat.status === 'pending' && (
                         <Button
                           variant="destructive"
                           size="sm"
                           onClick={() => handleModerate(chat.id, 'rejected')}
+                          className="h-8 text-xs font-semibold"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Rejeitar
+                        </Button>
+                      )}
+
+                      {chat.status === 'approved' ? (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleModerate(chat.id, 'disapproved')}
                           className="h-8 text-xs font-semibold"
                         >
                           <X className="h-3.5 w-3.5" />
@@ -576,19 +604,25 @@ export function ChatsTab({ data, initialFilter = 'all', onRefresh, isDemo, initi
           <DialogHeader>
             <DialogTitle>Editar Participante</DialogTitle>
             <DialogDescription>
-              Ajuste o nome de exibição, link oficial e categoria deste canal/grupo.
+              Ajuste o nome exibido no botão, o link oficial e a categoria deste canal/grupo.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSaveEdit} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground/80">Título / Nome</label>
+              <label className="text-xs font-semibold text-foreground/80">
+                Nome no botão (até 60 caracteres)
+              </label>
               <Input
                 type="text"
-                value={editingChat.title || ''}
-                onChange={(e) => setEditingChat({ ...editingChat, title: e.target.value })}
-                required
+                value={editingChat.display || ''}
+                onChange={(e) => setEditingChat({ ...editingChat, display: e.target.value })}
+                placeholder={editingChat.title || ''}
+                maxLength={60}
               />
+              <p className="text-[11px] text-muted-foreground">
+                Deixe em branco para usar o título do canal/grupo.
+              </p>
             </div>
 
             <div className="space-y-1.5">

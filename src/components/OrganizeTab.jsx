@@ -29,7 +29,7 @@ import { Switch } from './ui/Switch';
 import { useToast } from './ui/Toast';
 import { callEndpoint, saveSettingsSafe, haptic } from '@/lib/telegram';
 import { layoutPattern, repeatRows, paginateRows, resolveListAds } from '@/lib/layout';
-import { resolveStyle, cn } from '@/lib/utils';
+import { resolveStyle, sanitizeTelegramHtml, cn } from '@/lib/utils';
 
 const STYLE_DOT_COLOR = {
   '': 'bg-slate-400',
@@ -315,9 +315,10 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     const upsert = [];
     const remove = [...removedAdIds];
 
-    // Auto assign unique row/col within [16..19, 0..4] in sequential ascending order for partnerships.
-    // This isolates partnerships from the channel pattern grid (0..15), preventing repeating or
-    // vanishing bugs when patterns repeat or paginate, while strictly preserving partnership order.
+    // Auto assign unique row/col starting at [16, 0] for partnerships. Rows 16+
+    // stay outside the channel pattern grid, so partnership order is preserved
+    // when the list pattern repeats or paginates. Partnerships have their own
+    // 100-item limit and do not consume the list's C/G positions.
     for (let i = 0; i < ads.length; i++) {
       const ad = ads[i];
       upsert.push({
@@ -952,9 +953,10 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               <div
                 className="text-sm leading-relaxed whitespace-pre-wrap break-words"
                 dangerouslySetInnerHTML={{
-                  __html:
+                  __html: sanitizeTelegramHtml(
                     messageText ||
-                    '<b>📢 Conheça nossos canais e grupos parceiros!</b>\n\n<blockquote>Toque nos botões abaixo para participar e conferir os conteúdos exclusivos.</blockquote>',
+                    '<b>📢 Conheça nossos canais e grupos parceiros!</b>\n\n<blockquote>Toque nos botões abaixo para participar e conferir os conteúdos exclusivos.</blockquote>'
+                  ),
                 }}
               />
               <div className="flex justify-end items-center gap-1 text-[11px] text-slate-400">
@@ -1480,6 +1482,10 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               variant="outline"
               size="sm"
               onClick={() => {
+                if (ads.length >= 100) {
+                  toast('Limite de 100 divulgações por lista.', 'warning');
+                  return;
+                }
                 const newKey = nextKey();
                 const newAd = {
                   key: newKey,

@@ -13,6 +13,7 @@ import {
   FlaskConical,
   CheckSquare,
   ChevronRight,
+  Wrench,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
@@ -44,6 +45,14 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
   const [minMembers, setMinMembers] = React.useState(settings.minMembers ?? 0);
   const [savingMin, setSavingMin] = React.useState(false);
 
+  const [maintenanceEnabled, setMaintenanceEnabled] = React.useState(
+    Boolean(settings.maintenance?.enabled)
+  );
+  const [maintenanceMessage, setMaintenanceMessage] = React.useState(
+    settings.maintenance?.message ?? ''
+  );
+  const [savingMaintenance, setSavingMaintenance] = React.useState(false);
+
   // Admin management state
   const [adminModalOpen, setAdminModalOpen] = React.useState(false);
   const [adminList, setAdminList] = React.useState(
@@ -63,6 +72,8 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       setPin(Boolean(data.settings.pin));
       setDeletePrevious(Boolean(data.settings.deletePrevious));
       setMinMembers(data.settings.minMembers ?? 0);
+      setMaintenanceEnabled(Boolean(data.settings.maintenance?.enabled));
+      setMaintenanceMessage(data.settings.maintenance?.message ?? '');
       setAdminList(
         (data.settings.admins || []).filter((id) => !isOwnerId(id))
       );
@@ -125,6 +136,46 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
     } catch (err) {
       toast(err.message || 'Falha ao salvar aprovação', 'error');
     }
+  };
+
+  const saveMaintenance = async (next, successMessage) => {
+    if (isDemo) {
+      setMaintenanceEnabled(next.enabled);
+      setMaintenanceMessage(next.message);
+      toast(`${successMessage} (Demo)`, 'info');
+      return;
+    }
+    try {
+      setSavingMaintenance(true);
+      haptic('medium');
+      const updated = { ...settings, maintenance: next };
+      await saveSettingsSafe(updated, data?.version, onSyncVersion);
+      setMaintenanceEnabled(next.enabled);
+      setMaintenanceMessage(next.message);
+      toast(successMessage, next.enabled ? 'info' : 'success');
+      onRefresh?.();
+    } catch (err) {
+      toast(err.message || 'Falha ao salvar modo manutenção', 'error');
+    } finally {
+      setSavingMaintenance(false);
+    }
+  };
+
+  const handleToggleMaintenance = async (checked) => {
+    await saveMaintenance(
+      { enabled: checked, message: maintenanceMessage },
+      checked ? 'Modo manutenção ativado!' : 'Modo manutenção desativado!'
+    );
+  };
+
+  const handleSaveMaintenanceMessage = async (e) => {
+    e?.preventDefault();
+    await saveMaintenance(
+      { enabled: maintenanceEnabled, message: maintenanceMessage },
+      maintenanceMessage.trim()
+        ? 'Mensagem de manutenção salva!'
+        : 'Mensagem removida: o bot ficará silencioso durante a manutenção.'
+    );
   };
 
   const handleTogglePin = async (checked) => {
@@ -373,7 +424,85 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
         </CardContent>
       </Card>
 
-      {/* 2. Cores dos Botões no Telegram (Organizado com ColorPicker) */}
+      {/* 2. Modo Manutenção */}
+      <Card
+        className={`border-white/10 bg-card ${
+          maintenanceEnabled ? 'border-amber-500/40 bg-amber-500/5' : ''
+        }`}
+      >
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm font-semibold flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <Wrench className="h-4 w-4 text-amber-400" />
+              Modo Manutenção
+            </span>
+            <Badge variant={maintenanceEnabled ? 'warning' : 'secondary'} className="text-[10px]">
+              {maintenanceEnabled ? 'Ativado' : 'Desativado'}
+            </Badge>
+          </CardTitle>
+          <CardDescription>
+            Apenas administradores podem ativar. Enquanto ativo, usuários comuns não são atendidos.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-4 pt-2 space-y-3">
+          <div className="flex items-center justify-between rounded-xl bg-white/5 p-3 border border-white/10">
+            <div className="space-y-0.5 pr-3">
+              <span className="text-xs font-semibold text-foreground block">
+                Ativar modo manutenção
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Administradores continuam com acesso ao painel e aos comandos.
+              </span>
+            </div>
+            <Switch
+              id="maintenance-mode"
+              checked={maintenanceEnabled}
+              onChange={handleToggleMaintenance}
+              disabled={savingMaintenance}
+            />
+          </div>
+
+          <form onSubmit={handleSaveMaintenanceMessage} className="space-y-2">
+            <label
+              htmlFor="maintenance-message"
+              className="text-xs font-semibold text-foreground block"
+            >
+              Mensagem automática
+            </label>
+            <textarea
+              id="maintenance-message"
+              value={maintenanceMessage}
+              onChange={(e) => setMaintenanceMessage(e.target.value)}
+              maxLength={3500}
+              rows={4}
+              placeholder="Ex: 🛠️ Estamos em manutenção. Voltamos em breve!"
+              className="w-full min-h-[110px] resize-y rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary transition-all"
+            />
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Aceita HTML do Telegram. Deixe vazio para o bot não responder nada durante a manutenção.
+              </p>
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {maintenanceMessage.length}/3500
+              </span>
+            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={savingMaintenance}
+              className="text-xs"
+            >
+              {savingMaintenance ? 'Salvando...' : 'Salvar mensagem'}
+            </Button>
+          </form>
+
+          <p className="text-[11px] text-amber-300/80 leading-relaxed">
+            🛠️ Enquanto ativo, os envios automáticos e as remoções agendadas também ficam pausados.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* 3. Cores dos Botões no Telegram (Organizado com ColorPicker) */}
       <Card className="border-white/10 bg-card">
         <CardHeader className="p-4 pb-2">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -426,7 +555,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
         </CardContent>
       </Card>
 
-      {/* 3. Opções de Publicação (Switches) */}
+      {/* 4. Opções de Publicação (Switches) */}
       <Card className="border-white/10 bg-card">
         <CardHeader className="p-4 pb-2">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -461,7 +590,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
         </CardContent>
       </Card>
 
-      {/* 4. Mínimo de Membros */}
+      {/* 5. Mínimo de Membros */}
       <Card className="border-white/10 bg-card">
         <CardHeader className="p-4 pb-2">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -495,7 +624,7 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
         </CardContent>
       </Card>
 
-      {/* 5. Administradores & Modo de Demonstração */}
+      {/* 6. Administradores & Modo de Demonstração */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Card
           onClick={() => setAdminModalOpen(true)}

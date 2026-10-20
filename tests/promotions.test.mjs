@@ -67,6 +67,7 @@ const { submit } = await import('../tgcloud/lib/registration.js');
 const { DEFAULTS } = await import('../tgcloud/lib/domain.js');
 const { default: message } = await import('../tgcloud/handlers/message.js');
 const { default: callback } = await import('../tgcloud/handlers/callback_query.js');
+const { default: moderateChat } = await import('../tgcloud/endpoints/moderateChat.js');
 
 beforeEach(() => {
   sql?.close();
@@ -415,6 +416,46 @@ test('envio de solicitação de cadastro para o tópico de logs com dados comple
   // Linha 2: Abrir no Painel
   assert.equal(kb[1][0].text, '📊 Abrir no Painel');
   assert.match(kb[1][0].url, /\?tab=chats&chat=-1001234567/);
+});
+
+test('aprovação pelo painel atualiza o log original e notifica o dono', async () => {
+  sql.prepare('UPDATE list_settings SET value=? WHERE id=1').run(JSON.stringify({
+    ...DEFAULTS,
+    promoLogChat: -1001999999,
+    chatsLogTopic: 777
+  }));
+  sql.prepare(`
+    INSERT INTO list_chats (id, title, type, url, category, status, owner, updated)
+    VALUES (-1001234567, 'Canal Incrível', 'channel', 'https://t.me/canalincrivel', 0, 'pending', 42, 1000)
+  `).run();
+
+  const chat = {
+    id: -1001234567,
+    title: 'Canal Incrível',
+    type: 'channel',
+    url: 'https://t.me/canalincrivel',
+    category: 0,
+    owner: 42
+  };
+  const sentMsg = await sendChatSubmissionLog(chat, { id: 42, first_name: 'Gabriel' });
+  assert.ok(sentMsg);
+
+  calls = [];
+  await moderateChat(
+    { id: -1001234567, status: 'approved' },
+    { initData: { user: { id: 7595607953, first_name: 'Admin Gabriel' } } }
+  );
+
+  const editCall = calls.find(c => c.name === 'editMessageText' && c.p.message_id === sentMsg.message_id);
+  assert.ok(editCall, 'deve editar a mensagem de log enviada anteriormente');
+  assert.equal(editCall.p.chat_id, -1001999999);
+  assert.match(editCall.p.text, /Solicitação APROVADA/);
+
+  const ownerNotice = calls.find(c => c.name === 'sendMessage' && c.p.chat_id === 42);
+  assert.ok(ownerNotice, 'deve notificar o dono do cadastro');
+  assert.match(ownerNotice.p.text, /aprovado/);
+
+  assert.equal(sql.prepare('SELECT status FROM list_chats WHERE id=-1001234567').get().status, 'approved');
 });
 
 test('callback de aprovação e rejeição de cadastros pelos administradores', async () => {

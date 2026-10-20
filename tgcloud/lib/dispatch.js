@@ -1,6 +1,6 @@
 import { db, api, EndpointError } from 'sdk';
 import { config, getChat, state, putState } from './store.js';
-import { makePages, nextTime } from './domain.js';
+import { makePages, nextTime, normalizeMaintenance } from './domain.js';
 import { rights } from './registration.js';
 export async function lock(){
  await db.run("INSERT INTO list_runtime(id,value) VALUES('dispatch_lock','0') ON CONFLICT(id) DO NOTHING");
@@ -9,13 +9,16 @@ export async function lock(){
 export async function unlock(){await putState('dispatch_lock',0);}
 export async function createRound(){
  if(await db.get("SELECT id FROM list_rounds WHERE status='active' LIMIT 1"))throw new EndpointError('Já existe um envio em andamento.');
- const {settings}=await config();const [list,ads]=await Promise.all([db.all("SELECT * FROM list_chats WHERE status='approved'"),db.all('SELECT * FROM list_ads ORDER BY slot_row,slot_col,id')]);
+ const {settings}=await config();
+ if(normalizeMaintenance(settings.maintenance).enabled)throw new EndpointError('O modo manutenção está ativado. Desative-o antes de enviar a lista.');
+ const [list,ads,me]=await Promise.all([db.all("SELECT * FROM list_chats WHERE status='approved'"),db.all('SELECT * FROM list_ads ORDER BY slot_row,slot_col,id'),api.getMe().catch(()=>null)]);
  const seed = Math.floor(Date.now()/60000);
+ const botUsername = me?.username || '';
  if (settings.listType === 'simple') {
   const channelList = list.filter(c => c.type === 'channel');
   const groupList = list.filter(c => c.type !== 'channel');
-  const channelPages = makePages(channelList, settings, seed, ads);
-  const groupPages = makePages(groupList, settings, seed, ads);
+  const channelPages = makePages(channelList, settings, seed, ads, botUsername);
+  const groupPages = makePages(groupList, settings, seed, ads, botUsername);
   if (!channelPages.length && !groupPages.length) throw new EndpointError('Nenhum participante aprovado com link válido.');
   const id = String(Date.now());
   const content = {
@@ -29,7 +32,7 @@ export async function createRound(){
   await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')', { ':id': id, ':n': Date.now(), ':c': JSON.stringify(content) });
   return id;
  }
- const pages=makePages(list,settings,seed,ads);if(!pages.length)throw new EndpointError('Nenhum participante aprovado com link válido.');
+ const pages=makePages(list,settings,seed,ads,botUsername);if(!pages.length)throw new EndpointError('Nenhum participante aprovado com link válido.');
  const id=String(Date.now());await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')',{':id':id,':n':Date.now(),':c':JSON.stringify({pages,settings,listType:'mixed',destinations:list.map(c=>c.id)})});return id;
 }
 export async function removeLists() {
@@ -64,6 +67,7 @@ export async function processQueue({scheduled=false}={}){
  const now=Date.now();if(scheduled)await putState('schedulerHeartbeat',now);
  let active=await db.get("SELECT * FROM list_rounds WHERE status='active' ORDER BY created LIMIT 1");
  const c=await config();
+ if(normalizeMaintenance(c.settings.maintenance).enabled)return {idle:true,maintenance:true};
  const rem=c.settings.removalSchedule;
  if(scheduled&&rem?.enabled&&rem.nextAt<=now){
   await removeLists();

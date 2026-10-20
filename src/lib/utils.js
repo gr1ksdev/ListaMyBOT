@@ -5,6 +5,74 @@ export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
 
+const TELEGRAM_ALLOWED_TAGS = new Set([
+  'B', 'STRONG', 'I', 'EM', 'U', 'INS', 'S', 'STRIKE', 'DEL',
+  'A', 'CODE', 'PRE', 'BLOCKQUOTE', 'SPAN', 'TG-SPOILER', 'TG-EMOJI', 'BR'
+]);
+const TELEGRAM_DROP_TAGS = new Set([
+  'SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META',
+  'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'OPTION'
+]);
+
+// Telegram accepts a small HTML subset in messages. The preview uses that HTML,
+// so strip event handlers, scripts and any tag Telegram would not render.
+export function sanitizeTelegramHtml(html) {
+  const raw = String(html ?? '');
+  const Parser = globalThis.DOMParser || globalThis.window?.DOMParser;
+  if (typeof Parser !== 'function') {
+    return raw.replace(/<[^>]*>/g, '');
+  }
+
+  const doc = new Parser().parseFromString(`<div>${raw}</div>`, 'text/html');
+  const root = doc.body.firstElementChild;
+  if (!root) return '';
+
+  const walk = (node) => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === 3) continue;
+      if (child.nodeType !== 1) {
+        child.remove();
+        continue;
+      }
+      const tag = child.tagName.toUpperCase();
+      if (TELEGRAM_DROP_TAGS.has(tag)) {
+        child.remove();
+        continue;
+      }
+      if (!TELEGRAM_ALLOWED_TAGS.has(tag)) {
+        walk(child);
+        while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
+        child.remove();
+        continue;
+      }
+      for (const attr of [...child.attributes]) {
+        const name = attr.name.toLowerCase();
+        const value = attr.value;
+        if (name === 'href' && tag === 'A') {
+          if (!/^(https?:\/\/|tg:\/\/|mailto:)/i.test(value.trim())) child.removeAttribute(attr.name);
+          continue;
+        }
+        if (name === 'class' && (tag === 'SPAN' || tag === 'TG-SPOILER')) {
+          if (value !== 'tg-spoiler') child.removeAttribute(attr.name);
+          continue;
+        }
+        if (name === 'class' && (tag === 'CODE' || tag === 'PRE')) {
+          if (!/^language-[\w-]+$/i.test(value)) child.removeAttribute(attr.name);
+          continue;
+        }
+        if (name === 'emoji-id' && tag === 'TG-EMOJI') {
+          if (!/^\d+$/.test(value)) child.removeAttribute(attr.name);
+          continue;
+        }
+        child.removeAttribute(attr.name);
+      }
+      walk(child);
+    }
+  };
+  walk(root);
+  return root.innerHTML;
+}
+
 export function initials(title) {
   return String(title || 'Canal')
     .trim()

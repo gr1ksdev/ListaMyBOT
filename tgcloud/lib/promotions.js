@@ -7,7 +7,7 @@ import { escHtml } from './navigation.js';
 export async function updatePromoConfig(partial) {
   const c = await config();
   Object.assign(c.settings, partial);
-  await db.run('UPDATE list_settings SET value=:v WHERE id=1', { ':v': JSON.stringify(c.settings) });
+  await db.run('UPDATE list_settings SET value=:v,version=version+1 WHERE id=1', { ':v': JSON.stringify(c.settings) });
   return c.settings;
 }
 
@@ -195,7 +195,7 @@ export async function submitPromotion(user, data) {
         if (topicRes.ok && topicRes.topicId) {
           topicId = topicRes.topicId;
           c.settings.promoLogTopic = topicId;
-          await db.run('UPDATE list_settings SET value=:v WHERE id=1', { ':v': JSON.stringify(c.settings) });
+          await db.run('UPDATE list_settings SET value=:v,version=version+1 WHERE id=1', { ':v': JSON.stringify(c.settings) });
         }
       } catch (e) {
         console.warn('Topic auto-creation notice:', e);

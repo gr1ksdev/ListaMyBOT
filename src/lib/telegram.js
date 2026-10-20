@@ -146,9 +146,10 @@ export async function saveSettingsSafe(settings, version, onVersionSync) {
   } catch (err) {
     if (err.message && err.message.includes('As configurações mudaram')) {
       const fresh = await callEndpoint('dashboard', {});
-      const freshVersion = fresh?.version || 1;
-      onVersionSync?.(freshVersion + 1, fresh);
-      return await callEndpoint('saveSettings', { settings, version: freshVersion });
+      onVersionSync?.(fresh?.version || 1, fresh);
+      // Do not silently resend stale settings: another administrator may have
+      // changed a different field. Refresh the panel and let the user retry.
+      throw new Error('As configurações mudaram em outro dispositivo. Revise os dados atualizados e salve novamente.');
     }
     throw err;
   }

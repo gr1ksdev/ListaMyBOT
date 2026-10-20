@@ -38,8 +38,24 @@ export const DEFAULT_LIST_ADS = {
  randomPool: [],
  fixedAdId: null
 };
-export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, supportLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)), footerButtons:true };
-export function validateSettings(input, now=Date.now()) {
+export const DEFAULT_MAINTENANCE_MESSAGE = '🛠️ <b>Bot em manutenção</b>\n\nEstamos fazendo ajustes e voltamos em breve. Obrigado pela paciência!';
+export function normalizeMaintenance(value) {
+ const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+ return {
+  enabled: source.enabled === true,
+  message: typeof source.message === 'string' ? source.message : DEFAULT_MAINTENANCE_MESSAGE
+ };
+}
+export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, maintenance:{ enabled:false, message:DEFAULT_MAINTENANCE_MESSAGE }, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, supportLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)), footerButtons:true };
+function scheduleConfigKey(s) {
+ return JSON.stringify({
+  enabled: s.enabled,
+  mode: s.mode,
+  minutes: s.minutes,
+  times: [...new Set(s.times || [])].sort()
+ });
+}
+export function validateSettings(input, now=Date.now(), previous=null) {
  const s=JSON.parse(JSON.stringify(input));
  s.minMembers=s.minMembers??0;
  if(!Number.isSafeInteger(s.minMembers)||s.minMembers<0||s.minMembers>100000000)throw Error('Mínimo de membros: informe um inteiro entre 0 e 100.000.000. Use 0 para desativar.');
@@ -64,12 +80,28 @@ export function validateSettings(input, now=Date.now()) {
  } else {
   s.chatColors = {};
  }
+ // Older panel builds may not send this new field. Preserve the current mode
+ // instead of accidentally turning maintenance off on an unrelated save.
+ const rawMaintenance = s.maintenance === undefined ? previous?.maintenance : s.maintenance;
+ if(rawMaintenance !== undefined && (rawMaintenance === null || typeof rawMaintenance !== 'object' || Array.isArray(rawMaintenance))) throw Error('Configuração de manutenção inválida.');
+ if(rawMaintenance?.enabled !== undefined && typeof rawMaintenance.enabled !== 'boolean') throw Error('Ativação da manutenção inválida.');
+ if(rawMaintenance?.message !== undefined && typeof rawMaintenance.message !== 'string') throw Error('Mensagem de manutenção inválida.');
+ s.maintenance = normalizeMaintenance(rawMaintenance);
+ s.maintenance.message = s.maintenance.message.trim();
+ if(s.maintenance.message.length > 3500) throw Error('A mensagem de manutenção pode ter no máximo 3.500 caracteres.');
  for(const k of ['pin','deletePrevious','groupCategories']) if(typeof s[k]!=='boolean') throw Error('Opção inválida.');
  const a=s.schedule;
  if(!a||typeof a.enabled!=='boolean'||!['interval','fixed'].includes(a.mode)) throw Error('Agendamento inválido.');
  if(!Number.isInteger(a.minutes)||a.minutes<1||a.minutes>10080) throw Error('Intervalo: de 1 a 10.080 minutos.');
  if(!Array.isArray(a.times)||!a.times.length||a.times.length>24||a.times.some(t=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(t))) throw Error('Informe horários válidos, como 09:00.');
- a.times=[...new Set(a.times)].sort(); a.nextAt=nextTime(a,now);
+ const previousSchedule = previous?.schedule;
+ const scheduleUnchanged = previousSchedule && scheduleConfigKey(previousSchedule) === scheduleConfigKey(a);
+ const previousScheduleNextAt = previousSchedule?.nextAt;
+ a.times=[...new Set(a.times)].sort();
+ a.nextAt = scheduleUnchanged && a.enabled &&
+  Number.isSafeInteger(previousScheduleNextAt) && previousScheduleNextAt > 0
+  ? previousScheduleNextAt
+  : nextTime(a,now);
  if(!s.removalSchedule){
   s.removalSchedule={enabled:false,mode:'fixed',minutes:60,times:['06:00','18:00'],nextAt:0};
  }
@@ -77,7 +109,14 @@ export function validateSettings(input, now=Date.now()) {
  if(typeof rem.enabled!=='boolean'||!['interval','fixed'].includes(rem.mode)) throw Error('Agendamento de remoção inválido.');
  if(!Number.isInteger(rem.minutes)||rem.minutes<1||rem.minutes>10080) throw Error('Intervalo de remoção: de 1 a 10.080 minutos.');
  if(!Array.isArray(rem.times)||!rem.times.length||rem.times.length>24||rem.times.some(t=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(t))) throw Error('Informe horários de remoção válidos, como 06:00.');
- rem.times=[...new Set(rem.times)].sort(); rem.nextAt=nextTime(rem,now);
+ const previousRemoval = previous?.removalSchedule;
+ const removalUnchanged = previousRemoval && scheduleConfigKey(previousRemoval) === scheduleConfigKey(rem);
+ const previousRemovalNextAt = previousRemoval?.nextAt;
+ rem.times=[...new Set(rem.times)].sort();
+ rem.nextAt = removalUnchanged && rem.enabled &&
+  Number.isSafeInteger(previousRemovalNextAt) && previousRemovalNextAt > 0
+  ? previousRemovalNextAt
+  : nextTime(rem,now);
  s.promoLogChat = Number.isSafeInteger(s.promoLogChat) ? s.promoLogChat : 0;
  s.promoLogTopic = Number.isSafeInteger(s.promoLogTopic) ? s.promoLogTopic : 0;
  s.chatsLogTopic = Number.isSafeInteger(s.chatsLogTopic) ? s.chatsLogTopic : 0;
@@ -201,7 +240,7 @@ export function resolveListAds(s, ads = [], seed = 0) {
 
  return result;
 }
-export function makePages(chats,s,seed=0,ads=[]) {
+export function makePages(chats,s,seed=0,ads=[],botUsername='') {
  let list=chats.filter(c=>c.status==='approved'&&validLink(c.url)).slice();
  if(s.order==='manual')list.sort((a,b)=>a.position-b.position||a.id-b.id);
  else list.sort((a,b)=>(a.display||a.title).localeCompare(b.display||b.title,'pt-BR'));
@@ -247,11 +286,10 @@ export function makePages(chats,s,seed=0,ads=[]) {
  }
 
  if (s.footerButtons !== false) {
-  const botUsername = s.botUsername || 'ListaMyBOT';
-  const botAddUrl = `https://t.me/${botUsername}?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users`;
+  const actualBotUsername = botUsername || s.botUsername || 'ListaMyBOT';
+  const botAddUrl = `https://t.me/${actualBotUsername}?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users`;
   rows.push([
-   { text: 'Add-me em C/G', url: botAddUrl, style: 'primary' },
-   { text: 'Canal Oficial', url: 'https://t.me/ChannelLogBM', style: 'success' }
+   { text: 'Adicionar no meu Canal/Grupo', url: botAddUrl, style: 'success' }
   ]);
  }
 
