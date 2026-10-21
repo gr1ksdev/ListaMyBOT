@@ -1,6 +1,6 @@
 import {membershipBlocked} from '../lib/membership.js';
 import { api, db } from 'sdk';
-import { CATEGORIES } from '../lib/domain.js';
+import { resolveCategories } from '../lib/domain.js';
 import { config, getChat, putState, isAdmin, state } from '../lib/store.js';
 import { chatAdmin, menu, submit, register, closeMenu } from '../lib/registration.js';
 import { privateScreen, escHtml } from '../lib/navigation.js';
@@ -63,7 +63,7 @@ export default async function(q){
   try{memberCount=await api.getChatMemberCount({chat_id:chatId});}catch{}
   const updateLogAndOwner=async(status,reason='')=>{
    c.status=status;
-   let text=formatChatSubmissionMessage(c,memberCount,c.owner,status,q.from);
+   let text=formatChatSubmissionMessage(c,memberCount,c.owner,status,q.from,resolveCategories(settings));
    if(status==='rejected'&&reason)text+=`\n\n<b>Motivo:</b> ${escHtml(reason)}`;
    try{
     await api.editMessageText({
@@ -237,8 +237,9 @@ export default async function(q){
  if(['cat','cats','submit'].includes(action)&&!editable)throw Error('Cadastro já enviado. Use Atualizar status para acompanhar.');
  await putState(`await_link:${target>0?user:target+':'+user}`,null);
  if(action==='cat'){
- const category=Number(value);if(!Number.isInteger(category)||!CATEGORIES[category])throw Error('Categoria inválida.');
- await db.run("UPDATE list_chats SET category=:c,updated=:n WHERE id=:id AND status NOT IN ('pending','approved')",{':c':category,':n':Date.now(),':id':id});c.category=category;await answer(CATEGORIES[category]);await menu(c,target,q.message,'categories');
+ const categories=resolveCategories(settings);
+ const category=Number(value);if(!Number.isInteger(category)||!categories[category])throw Error('Categoria inválida.');
+ await db.run("UPDATE list_chats SET category=:c,updated=:n WHERE id=:id AND status NOT IN ('pending','approved')",{':c':category,':n':Date.now(),':id':id});c.category=category;await answer(categories[category]);await menu(c,target,q.message,'categories');
  }else if(action==='submit'){
  c.status=await submit(c,user,q.from);await answer(c.status==='rejected'?'Cadastro rejeitado: membros abaixo do mínimo.':'Cadastro enviado!',c.status==='rejected');
  if(target<0&&['pending','approved'].includes(c.status)&&await closeMenu(c,target,q.message.message_id))return;

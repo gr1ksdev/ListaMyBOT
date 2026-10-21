@@ -12,8 +12,8 @@ export default async function(input,ctx){
  if(a.settings.listType==='simple'){
   const channelList=list.filter(c=>c.type==='channel');
   const groupList=list.filter(c=>c.type!=='channel');
-  const channelPages=makePages(channelList,a.settings,0,ads,botUsername);
-  const groupPages=makePages(groupList,a.settings,0,ads,botUsername);
+  const channelPages=makePages(channelList,a.settings,0,ads,botUsername,'channel');
+  const groupPages=makePages(groupList,a.settings,0,ads,botUsername,'group');
   if(!channelPages.length&&!groupPages.length)throw new EndpointError('Aprove ao menos um canal ou grupo para testar a lista.');
   if(channelPages.length){
    await api.sendMessage({chat_id:a.id,text:'📢 <b>[Lista Simples — Canais]</b>\nEsta é a lista entregue apenas nos canais:',parse_mode:'HTML'});

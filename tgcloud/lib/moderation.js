@@ -1,5 +1,5 @@
 import { db, EndpointError } from 'sdk';
-import { CATEGORIES, validLink } from './domain.js';
+import { resolveCategories, validLink } from './domain.js';
 import { checkMembers } from './membership.js';
 import { rights } from './registration.js';
 
@@ -13,7 +13,7 @@ export async function approveChat(c, settings) {
   settings.bannedUsers.map(Number).includes(Number(c.owner));
  if (banned) throw new EndpointError('O dono deste cadastro está banido. Desbane o usuário antes de aprovar.');
 
- if (!validLink(c.url) || !CATEGORIES[c.category]) {
+ if (!validLink(c.url) || !resolveCategories(settings)[c.category]) {
   throw new EndpointError('Complete o link e a categoria em Editar antes de aprovar.');
  }
 

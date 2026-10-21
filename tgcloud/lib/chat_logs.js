@@ -1,5 +1,5 @@
 import { api, db } from 'sdk';
-import { APP_URL, CATEGORIES } from './domain.js';
+import { APP_URL, CATEGORIES, resolveCategories } from './domain.js';
 import { config, putState, state } from './store.js';
 import { escHtml } from './navigation.js';
 
@@ -41,10 +41,10 @@ export async function ensureChatsTopic(logChatId) {
   }
 }
 
-export function formatChatSubmissionMessage(c, memberCount, actor, status = 'pending', reviewer = null) {
+export function formatChatSubmissionMessage(c, memberCount, actor, status = 'pending', reviewer = null, categories = CATEGORIES) {
   const isChannel = c.type === 'channel';
   const typeName = isChannel ? '📢 Canal' : '💬 Grupo';
-  const catName = (c.category >= 0 && CATEGORIES[c.category]) ? CATEGORIES[c.category] : 'Geral';
+  const catName = (c.category >= 0 && categories[c.category]) ? categories[c.category] : 'Geral';
   const membersFormatted = Number.isSafeInteger(Number(memberCount)) && Number(memberCount) >= 0
     ? Number(memberCount).toLocaleString('pt-BR')
     : 'Indisponível';
@@ -152,7 +152,7 @@ export async function sendChatSubmissionLog(c, actor) {
     console.warn('Falha ao obter quantidade de membros para o log:', e);
   }
 
-  const text = formatChatSubmissionMessage(c, memberCount, actor, 'pending');
+  const text = formatChatSubmissionMessage(c, memberCount, actor, 'pending', null, resolveCategories(cfg.settings));
   const replyMarkup = chatSubmissionKeyboard(c.id, 'pending');
 
   try {
@@ -215,7 +215,7 @@ export async function updateChatSubmissionLog(c, status, reviewer = null, reason
     memberCount = await api.getChatMemberCount({ chat_id: c.id });
   } catch {}
 
-  let text = formatChatSubmissionMessage(c, memberCount, c.owner, status, reviewer);
+  let text = formatChatSubmissionMessage(c, memberCount, c.owner, status, reviewer, resolveCategories((await config()).settings));
   if (status === 'rejected' && reason) text += `\n\n<b>Motivo:</b> ${escHtml(reason)}`;
   try {
     await api.editMessageText({

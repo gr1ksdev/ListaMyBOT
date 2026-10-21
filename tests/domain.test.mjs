@@ -1,5 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
-import {DEFAULTS,DEFAULT_MAINTENANCE_MESSAGE,validateSettings,nextTime,makePages,permissionErrors,validLink} from '../tgcloud/lib/domain.js';
+import {DEFAULTS,DEFAULT_MAINTENANCE_MESSAGE,validateSettings,nextTime,makePages,permissionErrors,validLink,resolveCategories} from '../tgcloud/lib/domain.js';
+import {buildLayoutRows as buildBackendLayoutRows} from '../tgcloud/lib/layout.js';
+import {buildLayoutRows as buildPanelLayoutRows} from '../src/lib/layout.js';
 test('horários fixos usam UTC−3 e avançam ao próximo dia',()=>{const now=Date.parse('2026-10-13T23:00:00-03:00');assert.equal(new Date(nextTime({enabled:true,mode:'fixed',times:['09:00','20:00']},now)).toISOString(),'2026-10-14T12:00:00.000Z');});
 test('intervalo arbitrário de 90 minutos preserva a duração',()=>assert.equal(nextTime({enabled:true,mode:'interval',minutes:90},1000),5401000));
 test('validação rejeita configurações inválidas',()=>{assert.throws(()=>validateSettings({...DEFAULTS,columns:8}));assert.throws(()=>validateSettings({...DEFAULTS,schedule:{...DEFAULTS.schedule,times:['25:00']}}));assert.throws(()=>validateSettings({...DEFAULTS,admins:[NaN]}));});
@@ -210,6 +212,150 @@ test('botão default no fim da lista: Adicionar no meu Canal/Grupo', () => {
  assert.equal(footerRow[0].text, 'Adicionar no meu Canal/Grupo');
  assert.equal(footerRow[0].style, 'success');
  assert.equal(footerRow[0].url, 'https://t.me/ListaMyBOT?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users');
+});
+
+test('categorias personalizadas são validadas e preservadas em painéis antigos', () => {
+ const saved = validateSettings({ ...DEFAULTS, categories: [...DEFAULTS.categories, '🐶 Pets'] });
+ assert.equal(saved.categories.at(-1), '🐶 Pets');
+ assert.equal(resolveCategories(saved).length, DEFAULTS.categories.length + 1);
+
+ const { categories, ...withoutCategories } = saved;
+ const kept = validateSettings({ ...withoutCategories, buttonColor: 'primary' }, Date.now(), saved);
+ assert.deepEqual(kept.categories, saved.categories);
+
+ assert.throws(() => validateSettings({ ...DEFAULTS, categories: [] }), /categoria/i);
+ assert.throws(() => validateSettings({ ...DEFAULTS, categories: ['A', ''] }), /nome/i);
+ assert.throws(() => validateSettings({ ...DEFAULTS, categories: ['A', 2] }), /nome/i);
+ assert.throws(() => validateSettings({ ...DEFAULTS, categories: ['A', 'A'] }), /repita/i);
+ assert.throws(() => validateSettings({ ...DEFAULTS, categories: ['x'.repeat(61)] }), /60/);
+});
+
+test('layout personalizado fixa C/G e divulgação e preenche os demais botões', () => {
+ const chats = [
+  { id: 1, title: 'Canal A', type: 'channel', url: 'https://t.me/canala', status: 'approved', category: 0 },
+  { id: 2, title: 'Grupo B', type: 'group', url: 'https://t.me/grupob', status: 'approved', category: 0 },
+  { id: 3, title: 'Canal C', type: 'channel', url: 'https://t.me/canalc', status: 'approved', category: 0 },
+  { id: 4, title: 'Grupo D', type: 'group', url: 'https://t.me/grupod', status: 'approved', category: 0 }
+ ];
+ const ad = { id: 10, title: 'Patrocinador', url: 'https://t.me/patrocinador', style: 'primary' };
+ const settings = {
+  ...DEFAULTS,
+  order: 'alphabetical',
+  footerButtons: false,
+  buttonLayout: {
+   enabled: true,
+   fill: 'random',
+   rows: [
+    [{ kind: 'chat', chatId: 2 }, { kind: 'ad', adId: 10 }],
+    [{ kind: 'auto' }, { kind: 'chat', chatId: 1 }, { kind: 'auto' }]
+   ]
+  }
+ };
+ const rows = makePages(chats, settings, 0, [ad])[0].reply_markup.inline_keyboard;
+ assert.deepEqual(rows[0].map((b) => b.text), ['Grupo B', 'Patrocinador']);
+ assert.equal(rows[1][1].text, 'Canal A');
+ assert.equal(rows[1][1].url, 'https://t.me/canala');
+ const allTexts = rows.flat().map((b) => b.text).sort();
+ assert.deepEqual(allTexts, ['Canal A', 'Canal C', 'Grupo B', 'Grupo D', 'Patrocinador']);
+ assert.equal(new Set(allTexts).size, allTexts.length);
+});
+
+test('layout preenche apenas canais, apenas grupos ou respeita a lista simples', () => {
+ const chats = [
+  { id: 1, title: 'Canal A', type: 'channel', url: 'https://t.me/canala', status: 'approved', category: 0 },
+  { id: 2, title: 'Canal B', type: 'channel', url: 'https://t.me/canalb', status: 'approved', category: 0 },
+  { id: 3, title: 'Grupo C', type: 'group', url: 'https://t.me/grupoc', status: 'approved', category: 0 },
+  { id: 4, title: 'Grupo D', type: 'group', url: 'https://t.me/grupod', status: 'approved', category: 0 }
+ ];
+ const rowsFor = (fill, targetType = '') => {
+  const settings = {
+   ...DEFAULTS,
+   footerButtons: false,
+   buttonLayout: {
+    enabled: true,
+    fill,
+    rows: [[{ kind: 'auto' }, { kind: 'auto' }], [{ kind: 'auto' }, { kind: 'auto' }]]
+   }
+  };
+  return makePages(chats, settings, 0, [], '', targetType)[0].reply_markup.inline_keyboard.flat().map((b) => b.text);
+ };
+
+ assert.deepEqual(rowsFor('channel').sort(), ['Canal A', 'Canal B']);
+ assert.deepEqual(rowsFor('group').sort(), ['Grupo C', 'Grupo D']);
+ assert.deepEqual(rowsFor('random', 'channel').sort(), ['Canal A', 'Canal B']);
+ assert.deepEqual(rowsFor('random', 'group').sort(), ['Grupo C', 'Grupo D']);
+});
+
+test('layout repete apenas os espaços automáticos e ignora C/G removido', () => {
+ const chats = [
+  { id: 1, title: 'Canal A', type: 'channel', url: 'https://t.me/canala', status: 'approved', category: 0 },
+  { id: 2, title: 'Grupo B', type: 'group', url: 'https://t.me/grupob', status: 'approved', category: 0 },
+  { id: 3, title: 'Canal C', type: 'channel', url: 'https://t.me/canalc', status: 'approved', category: 0 }
+ ];
+ const settings = {
+  ...DEFAULTS,
+  footerButtons: false,
+  buttonLayout: {
+   enabled: true,
+   fill: 'random',
+   rows: [[{ kind: 'chat', chatId: 999 }, { kind: 'auto' }], [{ kind: 'auto' }]]
+  }
+ };
+ const rows = makePages(chats, settings, 0)[0].reply_markup.inline_keyboard;
+ const texts = rows.flat().map((b) => b.text);
+ assert.deepEqual(texts.sort(), ['Canal A', 'Canal C', 'Grupo B']);
+ assert.ok(rows.every((row) => row.length <= 2));
+});
+
+test('layout do painel espelha exatamente o motor usado no envio', () => {
+ const chats = [
+  { id: 1, title: 'Canal A', type: 'channel', url: 'https://t.me/canala', status: 'approved', category: 0 },
+  { id: 2, title: 'Grupo B', type: 'group', url: 'https://t.me/grupob', status: 'approved', category: 0 },
+  { id: 3, title: 'Canal C', type: 'channel', url: 'https://t.me/canalc', status: 'approved', category: 0 },
+  { id: 4, title: 'Grupo D', type: 'group', url: 'https://t.me/grupod', status: 'approved', category: 0 }
+ ];
+ const ads = [
+  { id: 7, title: 'Patrocinador', url: 'https://t.me/patrocinador', style: 'primary' },
+  { id: 8, title: 'Sem link', url: '' }
+ ];
+ const layout = {
+  enabled: true,
+  fill: 'random',
+  rows: [
+   [{ kind: 'chat', chatId: 2 }, { kind: 'ad', adId: 7 }, { kind: 'auto' }],
+   [{ kind: 'auto' }, { kind: 'auto' }]
+  ]
+ };
+
+ for (const options of [{}, { targetType: 'channel' }, { targetType: 'group' }]) {
+  assert.deepEqual(
+   buildPanelLayoutRows(chats, layout, ads, 42, options),
+   buildBackendLayoutRows(chats, layout, ads, 42, options)
+  );
+ }
+});
+
+test('validação do layout rejeita posições e divulgações repetidas', () => {
+ const base = { ...DEFAULTS, buttonLayout: { enabled: true, fill: 'random', rows: [[{ kind: 'auto' }]] } };
+ assert.equal(validateSettings(base).buttonLayout.fill, 'random');
+ assert.equal(
+  validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'invalido', rows: [[{ kind: 'auto' }]] } }).buttonLayout.fill,
+  'random'
+ );
+ assert.throws(() => validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'random', rows: [] } }), /layout/i);
+ assert.throws(
+  () => validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'random', rows: [[{ kind: 'chat', chatId: 1 }, { kind: 'chat', chatId: 1 }]] } }),
+  /mesmo canal/i
+ );
+ assert.throws(
+  () => validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'random', rows: [[{ kind: 'ad', adId: 2 }, { kind: 'ad', adId: 2 }]] } }),
+  /mesma divulgação/i
+ );
+
+ const saved = validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'group', rows: [[{ kind: 'chat', chatId: 1 }]] } });
+ const { buttonLayout, ...withoutLayout } = saved;
+ const kept = validateSettings({ ...withoutLayout, buttonColor: 'primary' }, Date.now(), saved);
+ assert.deepEqual(kept.buttonLayout, saved.buttonLayout);
 });
 
 

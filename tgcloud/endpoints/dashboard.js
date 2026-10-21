@@ -1,6 +1,6 @@
 import { db, api } from 'sdk';
 import { requireAdmin, state } from '../lib/store.js';
-import { CATEGORIES } from '../lib/domain.js';
+import { resolveCategories } from '../lib/domain.js';
 export default async function(input,ctx){
  const auth=await requireAdmin(ctx);
  const [chats,rounds,deliveries,schedulerHeartbeat,memberRows,adRows,lastRemovalSummary,userNameRows,me]=await Promise.all([
@@ -36,5 +36,5 @@ export default async function(input,ctx){
  lastDeliverySummary={total,sent:0,failed:0,uncertain:0,skipped:0,pending:0,sending:0};
  for(const row of counts)lastDeliverySummary[row.status]=row.n;
  }
- return {...auth,bot:{id:me?.id||0,username:me?.username||'ListaMyBOT',name:me?.first_name||'ListaMyBOT'},chats,rounds,deliveries,lastDeliverySummary,lastRemovalSummary,categories:CATEGORIES,schedulerHeartbeat,ads:adRows,bannedUsers};
+ return {...auth,bot:{id:me?.id||0,username:me?.username||'ListaMyBOT',name:me?.first_name||'ListaMyBOT'},chats,rounds,deliveries,lastDeliverySummary,lastRemovalSummary,categories:resolveCategories(auth.settings),schedulerHeartbeat,ads:adRows,bannedUsers};
 }

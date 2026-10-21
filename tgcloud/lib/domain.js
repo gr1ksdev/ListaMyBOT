@@ -1,4 +1,4 @@
-import {layoutPattern,repeatRows,paginateRows} from './layout.js';
+import {layoutPattern,repeatRows,paginateRows,buildLayoutRows} from './layout.js';
 export const OWNERS = [7595607953, 8474484790];
 export const OWNER = 7595607953;
 export function isOwner(id) {
@@ -26,6 +26,74 @@ export const CATEGORIES = [
  '🍥 Anime',
  '📰 Notícias'
 ];
+// Categories live in list_settings so the panel can add new niches without a
+// schema migration. The integer index stored in list_chats.category is kept
+// stable: new categories are appended and existing ones can only be renamed.
+export function resolveCategories(settings) {
+ const list = Array.isArray(settings?.categories)
+  ? settings.categories.map(x => String(x ?? '').trim())
+  : [];
+ return list.length ? list : [...CATEGORIES];
+}
+export function normalizeCategories(value) {
+ const source = value === undefined || value === null ? CATEGORIES : value;
+ if (!Array.isArray(source)) throw Error('Lista de categorias inválida.');
+ const clean = [];
+ for (const item of source) {
+  if (typeof item !== 'string') throw Error('Toda categoria precisa ter um nome.');
+  const name = item.trim();
+  if (!name) throw Error('Toda categoria precisa ter um nome.');
+  if (name.length > 60) throw Error('Cada categoria pode ter no máximo 60 caracteres.');
+  clean.push(name);
+ }
+ if (!clean.length) throw Error('Mantenha ao menos uma categoria cadastrada.');
+ if (clean.length > 60) throw Error('Use no máximo 60 categorias.');
+ if (new Set(clean).size !== clean.length) throw Error('Não repita o mesmo nome de categoria.');
+ return clean;
+}
+export const BUTTON_LAYOUT_FILLS = ['random', 'group', 'channel'];
+export const DEFAULT_BUTTON_LAYOUT = { enabled: false, fill: 'random', rows: [] };
+export function normalizeButtonLayout(value) {
+ const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+ if (source.rows !== undefined && !Array.isArray(source.rows)) throw Error('Layout de botões inválido.');
+ if (Array.isArray(source.rows) && source.rows.length > 20) throw Error('O layout pode ter no máximo 20 linhas.');
+ const rows = [];
+ const usedChats = new Set();
+ const usedAds = new Set();
+ let total = 0;
+ for (const rawRow of Array.isArray(source.rows) ? source.rows : []) {
+  if (!Array.isArray(rawRow) || !rawRow.length || rawRow.length > 5) {
+   throw Error('Cada linha do layout precisa ter de 1 a 5 botões.');
+  }
+  const row = [];
+  for (const rawCell of rawRow) {
+   const kind = rawCell?.kind || 'auto';
+   if (kind === 'chat') {
+    if (!Number.isSafeInteger(rawCell.chatId) || rawCell.chatId === 0) throw Error('Canal/grupo fixo inválido no layout.');
+    if (usedChats.has(rawCell.chatId)) throw Error('O mesmo canal/grupo não pode ocupar duas posições no layout.');
+    usedChats.add(rawCell.chatId);
+    row.push({ kind: 'chat', chatId: rawCell.chatId });
+   } else if (kind === 'ad') {
+    if (!Number.isSafeInteger(rawCell.adId) || rawCell.adId <= 0) throw Error('Divulgação fixa inválida no layout.');
+    if (usedAds.has(rawCell.adId)) throw Error('A mesma divulgação não pode ocupar duas posições no layout.');
+    usedAds.add(rawCell.adId);
+    row.push({ kind: 'ad', adId: rawCell.adId });
+   } else {
+    row.push({ kind: 'auto' });
+   }
+  }
+  total += row.length;
+  if (total > 100) throw Error('O layout pode ter no máximo 100 botões.');
+  rows.push(row);
+ }
+ const enabled = source.enabled === true;
+ if (enabled && !rows.length) throw Error('Adicione ao menos uma linha ao layout personalizado.');
+ return {
+  enabled,
+  fill: BUTTON_LAYOUT_FILLS.includes(source.fill) ? source.fill : 'random',
+  rows
+ };
+}
 export const DEFAULT_LIST_ADS = {
  enabled: false,
  mode: 'fixed',
@@ -46,7 +114,7 @@ export function normalizeMaintenance(value) {
   message: typeof source.message === 'string' ? source.message : DEFAULT_MAINTENANCE_MESSAGE
  };
 }
-export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, maintenance:{ enabled:false, message:DEFAULT_MAINTENANCE_MESSAGE }, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, supportLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)), footerButtons:true };
+export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, maintenance:{ enabled:false, message:DEFAULT_MAINTENANCE_MESSAGE }, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, supportLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)), footerButtons:true, categories:[...CATEGORIES], buttonLayout:JSON.parse(JSON.stringify(DEFAULT_BUTTON_LAYOUT)) };
 function scheduleConfigKey(s) {
  return JSON.stringify({
   enabled: s.enabled,
@@ -66,6 +134,10 @@ export function validateSettings(input, now=Date.now(), previous=null) {
  if(!Array.isArray(s.admins)||s.admins.length>20||s.admins.some(x=>!Number.isSafeInteger(x)||x<=0)) throw Error('IDs de administradores inválidos.');
  s.admins=[...new Set([...OWNERS,...s.admins])];
  s.bannedUsers = Array.isArray(s.bannedUsers) ? [...new Set(s.bannedUsers.filter(x=>Number.isSafeInteger(x)&&x>0))] : [];
+ // Older panel builds do not send these new fields. Preserve what is already
+ // stored instead of resetting the categories/layout on an unrelated save.
+ s.categories = normalizeCategories(s.categories === undefined ? (previous?.categories ?? CATEGORIES) : s.categories);
+ s.buttonLayout = normalizeButtonLayout(s.buttonLayout === undefined ? previous?.buttonLayout : s.buttonLayout);
  s.buttonColor = typeof s.buttonColor === 'string' && AD_STYLES.includes(s.buttonColor) ? s.buttonColor : '';
  s.channelColor = typeof s.channelColor === 'string' && AD_STYLES.includes(s.channelColor) ? s.channelColor : '';
  s.groupColor = typeof s.groupColor === 'string' && AD_STYLES.includes(s.groupColor) ? s.groupColor : '';
@@ -240,49 +312,60 @@ export function resolveListAds(s, ads = [], seed = 0) {
 
  return result;
 }
-export function makePages(chats,s,seed=0,ads=[],botUsername='') {
+export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='') {
  let list=chats.filter(c=>c.status==='approved'&&validLink(c.url)).slice();
  if(s.order==='manual')list.sort((a,b)=>a.position-b.position||a.id-b.id);
  else list.sort((a,b)=>(a.display||a.title).localeCompare(b.display||b.title,'pt-BR'));
  if(s.order==='rotate'&&list.length){const n=Math.abs(seed)%list.length;list=[...list.slice(n),...list.slice(0,n)];}
  if(s.groupCategories)list.sort((a,b)=>a.category-b.category);
- const buttons=list.map(c=>{
+ const categories=resolveCategories(s);
+ const makeChatButton=c=>{
+  const cat=categories[c.category];
+  const prefix=s.groupCategories&&cat?cat.split(' ')[0]+' ':'';
   const style=resolveButtonStyle(c,s);
   return {
-   text:((s.groupCategories?CATEGORIES[c.category].split(' ')[0]+' ':'')+(c.display||c.title)).slice(0,60),
+   text:(prefix+(c.display||c.title)).slice(0,60),
    url:c.url,
    ...(style?{style}:{})
   };
+ };
+ const makeAdButton=ad=>({
+  text:String(ad.title).slice(0,60),
+  url:ad.url,
+  ...(AD_STYLES.includes(ad.style)?{style:ad.style}:{})
  });
 
- const promoSlots = resolveListAds(s, ads, seed);
- const hasNewAds = Boolean(promoSlots.start || promoSlots.middle || promoSlots.end);
-
  let rows;
- if (hasNewAds) {
-  rows = repeatRows(buttons, layoutPattern(s), []);
-  const makeButton = (ad) => ({
-   text: String(ad.title).slice(0, 60),
-   url: ad.url,
-   ...(AD_STYLES.includes(ad.style) ? { style: ad.style } : {})
-  });
-  if (promoSlots.end) {
-   rows.push([makeButton(promoSlots.end)]);
-  }
-  if (promoSlots.middle) {
-   if (rows.length === 0) {
-    rows.push([makeButton(promoSlots.middle)]);
-   } else {
-    const midIdx = Math.max(1, Math.floor(rows.length / 2));
-    rows.splice(midIdx, 0, [makeButton(promoSlots.middle)]);
-   }
-  }
-  if (promoSlots.start) {
-   rows.unshift([makeButton(promoSlots.start)]);
-  }
+ if (s.buttonLayout?.enabled) {
+  // The panel-drawn layout is authoritative: pinned chats/ads keep their
+  // positions, auto cells are filled at send time and the layout repeats for
+  // the remaining participants using only its auto cells.
+  const layoutRows=buildLayoutRows(list,s.buttonLayout,ads,seed,{targetType});
+  rows=layoutRows.map(row=>row.map(cell=>cell.kind==='ad'?makeAdButton(cell.ad):makeChatButton(cell.chat)));
  } else {
-  const slots=(ads||[]).filter(a=>a.title&&a.url).map(a=>({row:a.slot_row,col:a.slot_col,button:{text:String(a.title).slice(0,60),url:a.url,...(AD_STYLES.includes(a.style)?{style:a.style}:{})}}));
-  rows = repeatRows(buttons, layoutPattern(s), slots);
+  const buttons=list.map(makeChatButton);
+  const promoSlots = resolveListAds(s, ads, seed);
+  const hasNewAds = Boolean(promoSlots.start || promoSlots.middle || promoSlots.end);
+  if (hasNewAds) {
+   rows = repeatRows(buttons, layoutPattern(s), []);
+   if (promoSlots.end) {
+    rows.push([makeAdButton(promoSlots.end)]);
+   }
+   if (promoSlots.middle) {
+    if (rows.length === 0) {
+     rows.push([makeAdButton(promoSlots.middle)]);
+    } else {
+     const midIdx = Math.max(1, Math.floor(rows.length / 2));
+     rows.splice(midIdx, 0, [makeAdButton(promoSlots.middle)]);
+    }
+   }
+   if (promoSlots.start) {
+    rows.unshift([makeAdButton(promoSlots.start)]);
+   }
+  } else {
+   const slots=(ads||[]).filter(a=>a.title&&a.url).map(a=>({row:a.slot_row,col:a.slot_col,button:makeAdButton(a)}));
+   rows = repeatRows(buttons, layoutPattern(s), slots);
+  }
  }
 
  if (s.footerButtons !== false) {

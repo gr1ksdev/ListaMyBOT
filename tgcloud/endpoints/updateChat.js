@@ -1,11 +1,11 @@
 import {checkMembers} from '../lib/membership.js';
 import { db, EndpointError } from 'sdk';
 import { requireAdmin, getChat } from '../lib/store.js';
-import { CATEGORIES, validLink, AD_STYLES } from '../lib/domain.js';
+import { resolveCategories, validLink, AD_STYLES } from '../lib/domain.js';
 import { rights } from '../lib/registration.js';
 export default async function(input,ctx){const auth=await requireAdmin(ctx);const {settings}=auth;const c=await getChat(input.id);if(!c)throw new EndpointError('Participante não encontrado.');
  const status=input.status??c.status, category=input.category??c.category, url=input.url??c.url, display=input.display??c.display,position=input.position??c.position;
- if(!['draft','pending','approved','rejected','paused'].includes(status)||!Number.isInteger(category)||!CATEGORIES[category])throw new EndpointError('Categoria ou situação inválida.');
+ if(!['draft','pending','approved','rejected','paused'].includes(status)||!Number.isInteger(category)||!resolveCategories(settings)[category])throw new EndpointError('Categoria ou situação inválida.');
  if(!validLink(url)||typeof display!=='string'||display.length>60||!Number.isInteger(position)||position<0)throw new EndpointError('Verifique link, nome (até 60 caracteres) e posição.');
  if(status==='approved'){
   if(Array.isArray(settings.bannedUsers)&&settings.bannedUsers.map(Number).includes(Number(c.owner)))throw new EndpointError('O dono deste cadastro está banido. Desbane o usuário antes de aprovar.');

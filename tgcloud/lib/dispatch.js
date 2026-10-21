@@ -17,8 +17,8 @@ export async function createRound(){
  if (settings.listType === 'simple') {
   const channelList = list.filter(c => c.type === 'channel');
   const groupList = list.filter(c => c.type !== 'channel');
-  const channelPages = makePages(channelList, settings, seed, ads, botUsername);
-  const groupPages = makePages(groupList, settings, seed, ads, botUsername);
+  const channelPages = makePages(channelList, settings, seed, ads, botUsername, 'channel');
+  const groupPages = makePages(groupList, settings, seed, ads, botUsername, 'group');
   if (!channelPages.length && !groupPages.length) throw new EndpointError('Nenhum participante aprovado com link válido.');
   const id = String(Date.now());
   const content = {

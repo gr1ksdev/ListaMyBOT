@@ -474,6 +474,40 @@ test('novas categorias, layout 2 por linha e botões de cancelar no canal', asyn
  assert.ok(menuRows.flat().some(b => b.text === '❌ Cancelar' && b.style === 'danger'));
 });
 
+test('categorias personalizadas aparecem no menu do bot e são aceitas no painel', async () => {
+ const custom = { ...DEFAULTS, categories: [...DEFAULTS.categories, '🐶 Pets'] };
+ sql.prepare('INSERT INTO list_settings(id,value,version) VALUES(1,?,1)').run(JSON.stringify(custom));
+ seed();
+ const chat = {
+  id: -100123,
+  title: 'Canal teste',
+  type: 'channel',
+  category: -1,
+  status: 'draft',
+  url: 'https://t.me/canalteste',
+  display: '',
+  position: 0
+ };
+
+ calls = [];
+ await menu(chat, -100123, undefined, 'categories');
+ const sentMenu = calls.find((x) => x.name === 'sendMessage').p;
+ const categoryButtons = sentMenu.reply_markup.inline_keyboard.flat();
+ assert.ok(categoryButtons.some((b) => b.text === '🐶 Pets'));
+ assert.ok(categoryButtons.some((b) => b.callback_data === 'cat:-100123:12'));
+
+ await updateChat(
+  { id: -100123, category: 12 },
+  { initData: { user: { id: 7595607953 } } }
+ );
+ assert.equal(sql.prepare('SELECT category FROM list_chats WHERE id=-100123').get().category, 12);
+
+ await assert.rejects(
+  () => updateChat({ id: -100123, category: 13 }, { initData: { user: { id: 7595607953 } } }),
+  /Categoria/
+ );
+});
+
 test('botão cancelar no canal/grupo fecha menu e remove mensagem', async () => {
  seed();
  calls = [];

@@ -1,6 +1,6 @@
 import {checkMembers,membershipBlocked} from './membership.js';
 import { db, api } from 'sdk';
-import { CATEGORIES, permissionErrors } from './domain.js';
+import { CATEGORIES, resolveCategories, permissionErrors } from './domain.js';
 import { config, getChat, state, putState, isBanned } from './store.js';
 import { screen, escHtml } from './navigation.js';
 import { sendChatSubmissionLog } from './chat_logs.js';
@@ -14,9 +14,9 @@ const STATUS = {
  paused: '⏸ Participação pausada'
 };
 
-export function keyboard(c, target = c.id){
+export function keyboard(c, target = c.id, categories = CATEGORIES){
  const rows=[];
- for(let i=0;i<CATEGORIES.length;i+=2)rows.push(CATEGORIES.slice(i,i+2).map((text,j)=>({
+ for(let i=0;i<categories.length;i+=2)rows.push(categories.slice(i,i+2).map((text,j)=>({
   text,
   callback_data:`cat:${c.id}:${i+j}`,
   style: c.category === i + j ? 'success' : 'primary'
@@ -32,6 +32,8 @@ export async function menu(c,target=c.id,message,view='summary'){
  const editable=!['approved','pending'].includes(c.status);
  const title=escHtml(c.title);
  const me=await api.getMe();
+ const cfg=await config();
+ const categories=resolveCategories(cfg.settings);
  const botLink=`tg://user?id=${me.id}`;
  const tgLink=t=>`<a href="${botLink}">${t}</a>`;
  const isChannel=c.type==='channel';
@@ -51,13 +53,13 @@ export async function menu(c,target=c.id,message,view='summary'){
   rows=[[{text:'↻ Verificar novamente',callback_data:`recheck:${c.id}`}]];
   if(target<0)rows.push([{text:'❌ Cancelar',callback_data:`cancel:${c.id}`,style:'danger'}]);
  }else if(view==='categories'&&editable){
-  const selCat=CATEGORIES[c.category]||'Ainda não definida';
+  const selCat=categories[c.category]||'Ainda não definida';
   text=`🏷 ${tgLink('Categorias')} • <b><i>${title}</i></b>\n\n`+
    `<blockquote><b>📂 Configuração de Nicho\n`+
    ` ┣ ${typeIcon} Tipo • ${tgLink(typeName)}\n`+
    ` ┗ 🎯 Categoria • ${selCat}\n</b></blockquote>\n\n`+
    `<b><i>✨ Escolha a categoria do seu ${tgLink(typeName)} abaixo para direcionar o público na ${tgLink('Lista')}:</i></b>`;
-  rows=keyboard(c,target).inline_keyboard;
+  rows=keyboard(c,target,categories).inline_keyboard;
  }else if(view==='link'){
   if(editable){
    text=`🔗 ${tgLink('Link de Acesso')} • <b><i>${title}</i></b>\n\n`+
@@ -79,7 +81,7 @@ export async function menu(c,target=c.id,message,view='summary'){
   rows=[navRow];
  }else{
   const statusLabel=STATUS[c.status]||c.status;
-  const catLabel=CATEGORIES[c.category]||'Ainda não selecionada';
+  const catLabel=categories[c.category]||'Ainda não selecionada';
   const urlLabel=c.url?escHtml(c.url):'Ainda não informado';
 
   text=`⚙️ ${tgLink('Configuração')} • <b><i>${title}</i></b>\n\n`+

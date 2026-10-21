@@ -14,6 +14,10 @@ import {
   CheckSquare,
   ChevronRight,
   Wrench,
+  Tag,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
@@ -45,6 +49,15 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
   const [minMembers, setMinMembers] = React.useState(settings.minMembers ?? 0);
   const [savingMin, setSavingMin] = React.useState(false);
 
+  // Category management
+  const [categories, setCategories] = React.useState(
+    Array.isArray(settings.categories) ? settings.categories : data?.categories || []
+  );
+  const [newCategory, setNewCategory] = React.useState('');
+  const [editingCategory, setEditingCategory] = React.useState(null);
+  const [categoryDraft, setCategoryDraft] = React.useState('');
+  const [savingCategory, setSavingCategory] = React.useState(false);
+
   const [maintenanceEnabled, setMaintenanceEnabled] = React.useState(
     Boolean(settings.maintenance?.enabled)
   );
@@ -72,6 +85,13 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       setPin(Boolean(data.settings.pin));
       setDeletePrevious(Boolean(data.settings.deletePrevious));
       setMinMembers(data.settings.minMembers ?? 0);
+      setCategories(
+        Array.isArray(data.settings.categories)
+          ? data.settings.categories
+          : data.categories || []
+      );
+      setEditingCategory(null);
+      setCategoryDraft('');
       setMaintenanceEnabled(Boolean(data.settings.maintenance?.enabled));
       setMaintenanceMessage(data.settings.maintenance?.message ?? '');
       setAdminList(
@@ -313,6 +333,125 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
     await saveAdminsToBackend(nextList);
   };
 
+  const categoryUsage = React.useMemo(() => {
+    const counts = new Map();
+    for (const chat of data?.chats || []) {
+      const index = Number(chat.category);
+      counts.set(index, (counts.get(index) || 0) + 1);
+    }
+    return counts;
+  }, [data]);
+
+  const persistCategories = async (next, successMessage) => {
+    const clean = next.map((name) => String(name || '').trim());
+    if (!clean.length) {
+      toast('Mantenha ao menos uma categoria.', 'error');
+      return false;
+    }
+    if (clean.some((name) => !name)) {
+      toast('Toda categoria precisa ter um nome.', 'error');
+      return false;
+    }
+    if (clean.length > 60) {
+      toast('Use no máximo 60 categorias.', 'error');
+      return false;
+    }
+    if (clean.some((name) => name.length > 60)) {
+      toast('Cada categoria pode ter no máximo 60 caracteres.', 'error');
+      return false;
+    }
+    if (new Set(clean).size !== clean.length) {
+      toast('Não repita o mesmo nome de categoria.', 'error');
+      return false;
+    }
+
+    if (isDemo) {
+      setCategories(clean);
+      toast(`${successMessage} (Demo)`, 'info');
+      return true;
+    }
+
+    try {
+      setSavingCategory(true);
+      haptic('medium');
+      await saveSettingsSafe({ ...settings, categories: clean }, data?.version, onSyncVersion);
+      setCategories(clean);
+      toast(successMessage, 'success');
+      onRefresh?.();
+      return true;
+    } catch (err) {
+      toast(err.message || 'Falha ao salvar categorias', 'error');
+      return false;
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
+  const handleAddCategory = async () => {
+    const name = newCategory.trim();
+    if (!name) {
+      toast('Digite o nome da nova categoria.', 'error');
+      return;
+    }
+    if (categories.some((category) => category.trim() === name)) {
+      toast('Essa categoria já existe.', 'warning');
+      return;
+    }
+    if (await persistCategories([...categories, name], 'Categoria adicionada!')) {
+      setNewCategory('');
+    }
+  };
+
+  const handleRenameCategory = async () => {
+    if (editingCategory === null) return;
+    const name = categoryDraft.trim();
+    if (!name) {
+      toast('O nome da categoria não pode ficar vazio.', 'error');
+      return;
+    }
+    if (
+      categories.some(
+        (category, index) => index !== editingCategory && category.trim() === name
+      )
+    ) {
+      toast('Já existe uma categoria com esse nome.', 'warning');
+      return;
+    }
+    const next = categories.map((category, index) =>
+      index === editingCategory ? name : category
+    );
+    if (await persistCategories(next, 'Categoria atualizada!')) {
+      setEditingCategory(null);
+      setCategoryDraft('');
+    }
+  };
+
+  const handleDeleteCategory = async (index) => {
+    if (index !== categories.length - 1) {
+      toast(
+        'Só é possível excluir a última categoria. Assim as categorias já vinculadas não mudam de posição.',
+        'warning'
+      );
+      return;
+    }
+    const usage = categoryUsage.get(index) || 0;
+    if (usage > 0) {
+      toast(
+        `Esta categoria está em uso por ${usage} cadastro(s). Troque a categoria deles antes de excluir.`,
+        'error'
+      );
+      return;
+    }
+    if (categories.length <= 1) {
+      toast('Mantenha ao menos uma categoria.', 'error');
+      return;
+    }
+    await persistCategories(
+      categories.filter((_, i) => i !== index),
+      'Categoria excluída!'
+    );
+  };
+
   return (
     <div className="space-y-4 pb-20 animate-in fade-in duration-300">
       {/* 0. Tipo de Entrega da Lista (Mista vs Simples) */}
@@ -377,6 +516,141 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
               </span>
             </button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* 0.1 Categorias da Lista */}
+      <Card className="border-white/10 bg-card">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm font-semibold flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Tag className="h-4 w-4 text-primary" />
+              Categorias da Lista
+            </span>
+            <Badge variant="secondary" className="text-[10px]">
+              {categories.length} {categories.length === 1 ? 'categoria' : 'categorias'}
+            </Badge>
+          </CardTitle>
+          <CardDescription>
+            Crie novos nichos para os canais e grupos. Novas categorias entram no final e podem ser
+            renomeadas sem perder os vínculos já feitos.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-4 pt-2 space-y-2.5">
+          <div className="space-y-1.5">
+            {categories.map((category, index) => {
+              const usage = categoryUsage.get(index) || 0;
+              const isEditing = editingCategory === index;
+              return (
+                <div
+                  key={`${index}-${category}`}
+                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2.5 py-2"
+                >
+                  <span className="w-5 text-center text-[10px] font-bold text-muted-foreground">
+                    {index + 1}
+                  </span>
+                  {isEditing ? (
+                    <>
+                      <Input
+                        value={categoryDraft}
+                        onChange={(e) => setCategoryDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRenameCategory();
+                          if (e.key === 'Escape') setEditingCategory(null);
+                        }}
+                        autoFocus
+                        maxLength={60}
+                        className="h-8 flex-1 bg-background border-white/10 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRenameCategory}
+                        disabled={savingCategory}
+                        className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition disabled:opacity-50"
+                        title="Salvar nome"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingCategory(null)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition"
+                        title="Cancelar"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1 truncate text-xs font-semibold text-foreground">
+                        {category}
+                      </span>
+                      {usage > 0 && (
+                        <Badge variant="outline" className="text-[10px] border-white/10">
+                          {usage} {usage === 1 ? 'cadastro' : 'cadastros'}
+                        </Badge>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          haptic('selection');
+                          setEditingCategory(index);
+                          setCategoryDraft(category);
+                        }}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition"
+                        title="Renomear categoria"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      {index === categories.length - 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCategory(index)}
+                          disabled={savingCategory || usage > 0 || categories.length <= 1}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                          title={
+                            usage > 0
+                              ? 'Categoria em uso: troque os cadastros antes de excluir'
+                              : 'Excluir última categoria'
+                          }
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <Input
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddCategory();
+              }}
+              placeholder="Nova categoria (ex.: 🐶 Pets)"
+              maxLength={60}
+              className="h-9 flex-1 bg-background border-white/10 text-xs"
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleAddCategory}
+              disabled={savingCategory || !newCategory.trim()}
+              className="h-9 text-xs font-semibold shrink-0"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Adicionar
+            </Button>
+          </div>
+
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Excluir só é possível na última categoria e quando ela não está em uso, para manter os
+            índices das categorias existentes estáveis.
+          </p>
         </CardContent>
       </Card>
 
