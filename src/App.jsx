@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { ToastProvider, useToast } from './components/ui/Toast';
-import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { OverviewTab } from './components/OverviewTab';
 import { ChatsTab } from './components/ChatsTab';
@@ -213,14 +212,6 @@ function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <Header
-        data={data}
-        loading={loading}
-        onRefresh={() => loadData(true)}
-        isDemo={isDemo}
-        onToggleDemo={handleToggleDemo}
-      />
-
       <main className="flex-1 mx-auto w-full max-w-4xl px-3.5 pt-4">
         {activeTab === 'overview' && (
           <OverviewTab
