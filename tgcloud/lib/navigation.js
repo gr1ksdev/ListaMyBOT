@@ -121,15 +121,15 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
   const regDate = await getUserRegDate(user);
   const rawName = fromUser?.first_name || await state(`user_name:${user}`, '') || 'Amigo';
 
-  text = `👤 <b>Central do Usuário</b>\n` +
-   `━━━━━━━━━━━━━━━━━━\n\n` +
-   `<blockquote><b>📊 Visão geral da conta</b>\n\n` +
+  text = `👤 <b>${tgLink('Central do Usuário')}</b>\n` +
+   `━━━━━━━━━━━━━━━━━━\n` +
+   `<blockquote><b>📊 Visão geral da conta</b>\n` +
    `┣ 🪪 Perfil: ${escHtml(rawName)}\n` +
    `┣ 🆔 ID: <code>${user}</code>\n` +
-   `┗ 📅 Desde: ${regDate}</blockquote>\n\n` +
+   `┗ 📅 Desde: ${regDate}</blockquote>\n` +
    `<blockquote><b>📡 Suas conexões</b>\n` +
    `┣ 📢 Canais vinculados: ${channelsCount}\n` +
-   `┗ 💬 Grupos vinculados: ${groupsCount}</blockquote>\n\n` +
+   `┗ 💬 Grupos vinculados: ${groupsCount}</blockquote>\n` +
    `━━━━━━━━━━━━━━━━━━\n` +
    `⚙️ <i>Acesse o menu abaixo para administrar suas conexões e gerenciar suas comunidades.</i>`;
 

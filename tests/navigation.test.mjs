@@ -28,7 +28,7 @@ test('novo menu /start, perfil e horários com botões e formatação HTML',asyn
  profileCallback.from.first_name='Freddy';
  await callback(profileCallback);
  const profileMsg=calls.filter(x=>x.name==='editMessageText').at(-1).p;
- assert.match(profileMsg.text,/👤 <b>Central do Usuário<\/b>/);
+ assert.match(profileMsg.text,/👤 <b><a href="tg:\/\/user\?id=999">Central do Usuário<\/a><\/b>/);
  assert.match(profileMsg.text,/<blockquote><b>📊 Visão geral da conta<\/b>\s+┣ 🪪 Perfil: Freddy\s+┣ 🆔 ID: <code>42<\/code>\s+┗ 📅 Desde: \d{2}\/\d{2}\/\d{4}<\/blockquote>/);
  assert.match(profileMsg.text,/<blockquote><b>📡 Suas conexões<\/b>\s+┣ 📢 Canais vinculados: 0\s+┗ 💬 Grupos vinculados: 0<\/blockquote>/);
  assert.match(profileMsg.text,/⚙️ <i>Acesse o menu abaixo para administrar suas conexões e gerenciar suas comunidades\.<\/i>/);

@@ -81,38 +81,40 @@ export function buildLayoutRows(chats,layout,ads=[],seed=0,options={}){
    const cells=[];
    for(const rawCell of rawRow||[]){
     const kind=rawCell?.kind||'auto';
+    const cellStyle=rawCell?.style||'';
     if(kind==='chat'){
      if(first){
       const chat=chatById.get(Number(rawCell.chatId));
       if(chat&&!placedChats.has(Number(chat.id))){
        placedChats.add(Number(chat.id));
-       cells.push({kind:'chat',chat});
+       cells.push({kind:'chat',chat,...(cellStyle?{style:cellStyle}:{})});
        continue;
       }
      }
      if(first){
       const auto=nextAuto();
-      if(auto){cells.push({kind:'chat',chat:auto});autoCount++;}
+      if(auto){cells.push({kind:'chat',chat:auto,...(cellStyle?{style:cellStyle}:{})});autoCount++;}
      }
      continue;
     }
     if(kind==='ad'){
      if(first){
-      const ad=adsById.get(Number(rawCell.adId));
+      const adRef=Number.isSafeInteger(rawCell.adId)?rawCell.adId:rawCell.adKey;
+      const ad=adsById.get(Number(adRef));
       if(ad&&!placedAds.has(Number(ad.id??ad.key))){
        placedAds.add(Number(ad.id??ad.key));
-       cells.push({kind:'ad',ad});
+       cells.push({kind:'ad',ad,...(cellStyle?{style:cellStyle}:{})});
        continue;
       }
      }
      if(first){
       const auto=nextAuto();
-      if(auto){cells.push({kind:'chat',chat:auto});autoCount++;}
+      if(auto){cells.push({kind:'chat',chat:auto,...(cellStyle?{style:cellStyle}:{})});autoCount++;}
      }
      continue;
     }
     const auto=nextAuto();
-    if(auto){cells.push({kind:'chat',chat:auto});autoCount++;}
+    if(auto){cells.push({kind:'chat',chat:auto,...(cellStyle?{style:cellStyle}:{})});autoCount++;}
    }
    if(cells.length)rows.push(cells);
   }

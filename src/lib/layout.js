@@ -47,6 +47,13 @@ export function repeatRows(items, pattern, slots = []) {
   return rows;
 }
 
+export function clampPageIndex(page, totalPages) {
+  const total = Math.max(0, Number(totalPages) || 0);
+  if (!total) return 0;
+  const current = Math.floor(Number(page) || 0);
+  return Math.max(0, Math.min(current, total - 1));
+}
+
 export function paginateRows(rows, maxButtons = 40, maxRows = 20) {
   const pages = [];
   let page = [];
@@ -120,19 +127,20 @@ export function buildLayoutRows(chats, layout, ads = [], seed = 0, options = {})
       const cells = [];
       for (const rawCell of rawRow || []) {
         const kind = rawCell?.kind || 'auto';
+        const cellStyle = rawCell?.style || '';
         if (kind === 'chat') {
           if (first) {
             const chat = chatById.get(Number(rawCell.chatId));
             if (chat && !placedChats.has(Number(chat.id))) {
               placedChats.add(Number(chat.id));
-              cells.push({ kind: 'chat', chat });
+              cells.push({ kind: 'chat', chat, ...(cellStyle ? { style: cellStyle } : {}) });
               continue;
             }
           }
           if (first) {
             const auto = nextAuto();
             if (auto) {
-              cells.push({ kind: 'chat', chat: auto });
+              cells.push({ kind: 'chat', chat: auto, ...(cellStyle ? { style: cellStyle } : {}) });
               autoCount++;
             }
           }
@@ -140,17 +148,18 @@ export function buildLayoutRows(chats, layout, ads = [], seed = 0, options = {})
         }
         if (kind === 'ad') {
           if (first) {
-            const ad = adsById.get(Number(rawCell.adId));
+            const adRef = Number.isSafeInteger(rawCell.adId) ? rawCell.adId : rawCell.adKey;
+            const ad = adsById.get(Number(adRef));
             if (ad && !placedAds.has(Number(ad.id ?? ad.key))) {
               placedAds.add(Number(ad.id ?? ad.key));
-              cells.push({ kind: 'ad', ad });
+              cells.push({ kind: 'ad', ad, ...(cellStyle ? { style: cellStyle } : {}) });
               continue;
             }
           }
           if (first) {
             const auto = nextAuto();
             if (auto) {
-              cells.push({ kind: 'chat', chat: auto });
+              cells.push({ kind: 'chat', chat: auto, ...(cellStyle ? { style: cellStyle } : {}) });
               autoCount++;
             }
           }
@@ -158,7 +167,7 @@ export function buildLayoutRows(chats, layout, ads = [], seed = 0, options = {})
         }
         const auto = nextAuto();
         if (auto) {
-          cells.push({ kind: 'chat', chat: auto });
+          cells.push({ kind: 'chat', chat: auto, ...(cellStyle ? { style: cellStyle } : {}) });
           autoCount++;
         }
       }

@@ -87,7 +87,7 @@ export function chatSubmissionKeyboard(chatId, status = 'pending') {
         { text: '❌ Rejeitar', callback_data: `chat_adm:reject:${chatId}`, style: 'danger' }
       ],
       [
-        { text: '📊 Abrir no Painel', url: panelUrl }
+        { text: '📊 Abrir no Painel', web_app: { url: panelUrl} }
       ]
     ]
   };

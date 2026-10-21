@@ -68,18 +68,20 @@ export function normalizeButtonLayout(value) {
   const row = [];
   for (const rawCell of rawRow) {
    const kind = rawCell?.kind || 'auto';
+   const style = ['primary', 'danger', 'success'].includes(rawCell?.style) ? rawCell.style : '';
+   const styleFields = style ? { style } : {};
    if (kind === 'chat') {
     if (!Number.isSafeInteger(rawCell.chatId) || rawCell.chatId === 0) throw Error('Canal/grupo fixo inválido no layout.');
     if (usedChats.has(rawCell.chatId)) throw Error('O mesmo canal/grupo não pode ocupar duas posições no layout.');
     usedChats.add(rawCell.chatId);
-    row.push({ kind: 'chat', chatId: rawCell.chatId });
+    row.push({ kind: 'chat', chatId: rawCell.chatId, ...styleFields });
    } else if (kind === 'ad') {
     if (!Number.isSafeInteger(rawCell.adId) || rawCell.adId <= 0) throw Error('Divulgação fixa inválida no layout.');
     if (usedAds.has(rawCell.adId)) throw Error('A mesma divulgação não pode ocupar duas posições no layout.');
     usedAds.add(rawCell.adId);
-    row.push({ kind: 'ad', adId: rawCell.adId });
+    row.push({ kind: 'ad', adId: rawCell.adId, ...styleFields });
    } else {
-    row.push({ kind: 'auto' });
+    row.push({ kind: 'auto', ...styleFields });
    }
   }
   total += row.length;
@@ -230,11 +232,12 @@ export function nextTime(a, now=Date.now()) {
  return Math.min(...a.times.map(t=>{const [h,m]=t.split(':').map(Number);const x=day+h*3600000+m*60000;return x>now?x:x+86400000;}));
 }
 export const AD_STYLES=['primary','danger','success'];
-export function resolveButtonStyle(c, s) {
+export function resolveButtonStyle(c, s, layoutStyle = '') {
  if (!c) return '';
  const direct = c.style || s?.chatColors?.[c.id] || s?.chatColors?.[String(c.id)];
  if (direct && AD_STYLES.includes(direct)) return direct;
  if (direct === 'none') return '';
+ if (AD_STYLES.includes(layoutStyle)) return layoutStyle;
  const isChannel = c.type === 'channel';
  const isGroup = c.type === 'group' || c.type === 'supergroup';
  if (isChannel && s?.channelColor && AD_STYLES.includes(s.channelColor)) return s.channelColor;
@@ -319,21 +322,24 @@ export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='') {
  if(s.order==='rotate'&&list.length){const n=Math.abs(seed)%list.length;list=[...list.slice(n),...list.slice(0,n)];}
  if(s.groupCategories)list.sort((a,b)=>a.category-b.category);
  const categories=resolveCategories(s);
- const makeChatButton=c=>{
+ const makeChatButton=(c,layoutStyle='')=>{
   const cat=categories[c.category];
   const prefix=s.groupCategories&&cat?cat.split(' ')[0]+' ':'';
-  const style=resolveButtonStyle(c,s);
+  const style=resolveButtonStyle(c,s,layoutStyle);
   return {
    text:(prefix+(c.display||c.title)).slice(0,60),
    url:c.url,
    ...(style?{style}:{})
   };
  };
- const makeAdButton=ad=>({
-  text:String(ad.title).slice(0,60),
-  url:ad.url,
-  ...(AD_STYLES.includes(ad.style)?{style:ad.style}:{})
- });
+ const makeAdButton=(ad,layoutStyle='')=>{
+  const style=AD_STYLES.includes(layoutStyle)?layoutStyle:ad.style;
+  return {
+   text:String(ad.title).slice(0,60),
+   url:ad.url,
+   ...(AD_STYLES.includes(style)?{style}:{})
+  };
+ };
 
  let rows;
  if (s.buttonLayout?.enabled) {
@@ -341,7 +347,7 @@ export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='') {
   // positions, auto cells are filled at send time and the layout repeats for
   // the remaining participants using only its auto cells.
   const layoutRows=buildLayoutRows(list,s.buttonLayout,ads,seed,{targetType});
-  rows=layoutRows.map(row=>row.map(cell=>cell.kind==='ad'?makeAdButton(cell.ad):makeChatButton(cell.chat)));
+  rows=layoutRows.map(row=>row.map(cell=>cell.kind==='ad'?makeAdButton(cell.ad,cell.style):makeChatButton(cell.chat,cell.style)));
  } else {
   const buttons=list.map(makeChatButton);
   const promoSlots = resolveListAds(s, ads, seed);

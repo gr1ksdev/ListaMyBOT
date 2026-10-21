@@ -20,6 +20,7 @@ import {
   Pencil,
   Tag,
   Users,
+  Radio,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
@@ -31,8 +32,11 @@ import { Checkbox } from './ui/Checkbox';
 import { Switch } from './ui/Switch';
 import { useToast } from './ui/Toast';
 import { callEndpoint, saveSettingsSafe, haptic } from '@/lib/telegram';
-import { layoutPattern, repeatRows, paginateRows, resolveListAds, buildLayoutRows } from '@/lib/layout';
-import { resolveStyle, sanitizeTelegramHtml, cn } from '@/lib/utils';
+import { layoutPattern, clampPageIndex } from '@/lib/layout';
+import { buildPreviewPages } from '@/lib/preview';
+import { sanitizeTelegramHtml, cn, isValidTelegramLink } from '@/lib/utils';
+
+const BUTTON_STYLES = ['primary', 'success', 'danger'];
 
 const STYLE_DOT_COLOR = {
   '': 'bg-slate-400',
@@ -40,6 +44,16 @@ const STYLE_DOT_COLOR = {
   success: 'bg-[#2ea043]',
   danger: 'bg-[#e53935]',
 };
+
+const adOptionValue = (ad) =>
+  Number.isSafeInteger(ad?.id) && ad.id > 0 ? String(ad.id) : `k${ad?.key}`;
+
+const tokenAdValue = (token) =>
+  Number.isSafeInteger(token?.adId) && token.adId > 0
+    ? String(token.adId)
+    : Number.isSafeInteger(token?.adKey)
+    ? `k${token.adKey}`
+    : '';
 
 export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   const { toast } = useToast();
@@ -72,6 +86,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   const [cellKind, setCellKind] = React.useState('auto');
   const [cellChatId, setCellChatId] = React.useState('');
   const [cellAdId, setCellAdId] = React.useState('');
+  const [cellStyle, setCellStyle] = React.useState('');
 
   // Message & order
   const [messageText, setMessageText] = React.useState('');
@@ -86,6 +101,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   // Modals
   const [adsModalOpen, setAdsModalOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
 
   const tokenSerialRef = React.useRef(200);
   const nextKey = () => ++tokenSerialRef.current;
@@ -151,16 +167,17 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     let initialRows = savedLayout.length
       ? savedLayout.map((row) =>
           row.map((cell) => {
+            const style = BUTTON_STYLES.includes(cell?.style) ? cell.style : '';
             if (cell?.kind === 'chat' && Number.isSafeInteger(cell.chatId)) {
-              return { key: nextKey(), kind: 'chat', chatId: cell.chatId };
+              return { key: nextKey(), kind: 'chat', chatId: cell.chatId, style };
             }
             if (cell?.kind === 'ad' && Number.isSafeInteger(cell.adId)) {
               const stillExists = initialAds.some((a) => Number(a.id) === cell.adId);
               return stillExists
-                ? { key: nextKey(), kind: 'ad', adId: cell.adId }
-                : { key: nextKey(), kind: 'auto' };
+                ? { key: nextKey(), kind: 'ad', adId: cell.adId, style }
+                : { key: nextKey(), kind: 'auto', style };
             }
-            return { key: nextKey(), kind: 'auto' };
+            return { key: nextKey(), kind: 'auto', style };
           })
         )
       : [];
@@ -183,6 +200,21 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     if (rows.length >= 15) return;
     haptic('light');
     setRows((prev) => [...prev, [{ key: nextKey(), kind: 'auto' }]]);
+  };
+
+  const handleInsertRow = (rIdx) => {
+    if (rows.length >= 15) {
+      toast('Máximo de 15 linhas no layout.', 'warning');
+      return;
+    }
+    haptic('light');
+    setRows((prev) => {
+      if (prev.length >= 15) return prev;
+      const next = prev.map((row) => [...row]);
+      next.splice(rIdx + 1, 0, [{ key: nextKey(), kind: 'auto' }]);
+      return next;
+    });
+    setSelectedTokenKey(null);
   };
 
   const handleRemoveRow = (rIdx) => {
@@ -301,7 +333,14 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     // deleting the cell, so the drawn row width is preserved.
     setRows((prev) =>
       prev.map((row) =>
-        row.map((t) => (t.kind === 'ad' && t.adId === idVal ? { key: nextKey(), kind: 'auto' } : t))
+        row.map((t) => {
+          const matches =
+            t.kind === 'ad' &&
+            ((ad.id && t.adId === ad.id) || t.adKey === ad.key);
+          return matches
+            ? { key: nextKey(), kind: 'auto', ...(t.style ? { style: t.style } : {}) }
+            : t;
+        })
       )
     );
     setCellEditor(null);
@@ -329,12 +368,14 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     setCellEditor({ rIdx, bIdx });
     setCellKind(token.kind || 'auto');
     setCellChatId(token.chatId != null ? String(token.chatId) : '');
-    setCellAdId(token.adId != null ? String(token.adId) : '');
+    setCellAdId(tokenAdValue(token));
+    setCellStyle(BUTTON_STYLES.includes(token.style) ? token.style : '');
   };
 
   const handleApplyCell = () => {
     if (!cellEditor) return;
     const { rIdx, bIdx } = cellEditor;
+    const appliedStyle = BUTTON_STYLES.includes(cellStyle) ? cellStyle : undefined;
     if (cellKind === 'chat') {
       const id = Number(cellChatId);
       if (!Number.isSafeInteger(id) || id === 0) {
@@ -355,18 +396,36 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         prev.map((row, ri) =>
           ri !== rIdx
             ? row
-            : row.map((t, bi) => (bi !== bIdx ? t : { ...t, kind: 'chat', chatId: id, adId: undefined }))
+            : row.map((t, bi) =>
+                bi !== bIdx
+                  ? t
+                  : {
+                      ...t,
+                      kind: 'chat',
+                      chatId: id,
+                      adId: undefined,
+                      adKey: undefined,
+                      style: appliedStyle,
+                    }
+              )
         )
       );
     } else if (cellKind === 'ad') {
-      const id = Number(cellAdId);
-      if (!Number.isSafeInteger(id) || id <= 0) {
+      const ref = String(cellAdId || '');
+      const selectedAd = ref.startsWith('k')
+        ? ads.find((ad) => ad.key === Number(ref.slice(1)))
+        : ads.find((ad) => Number(ad.id) === Number(ref));
+      if (!selectedAd) {
         toast('Selecione uma divulgação para fixar.', 'error');
         return;
       }
+      const selectedRef = adOptionValue(selectedAd);
       const alreadyUsed = rows.some((row, ri) =>
         row.some(
-          (t, bi) => !(ri === rIdx && bi === bIdx) && t.kind === 'ad' && Number(t.adId) === id
+          (t, bi) =>
+            !(ri === rIdx && bi === bIdx) &&
+            t.kind === 'ad' &&
+            tokenAdValue(t) === selectedRef
         )
       );
       if (alreadyUsed) {
@@ -377,7 +436,18 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         prev.map((row, ri) =>
           ri !== rIdx
             ? row
-            : row.map((t, bi) => (bi !== bIdx ? t : { ...t, kind: 'ad', adId: id, chatId: undefined }))
+            : row.map((t, bi) =>
+                bi !== bIdx
+                  ? t
+                  : {
+                      ...t,
+                      kind: 'ad',
+                      adId: selectedAd.id,
+                      adKey: selectedAd.id ? undefined : selectedAd.key,
+                      chatId: undefined,
+                      style: appliedStyle,
+                    }
+              )
         )
       );
     } else {
@@ -385,7 +455,18 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         prev.map((row, ri) =>
           ri !== rIdx
             ? row
-            : row.map((t, bi) => (bi !== bIdx ? t : { ...t, kind: 'auto', chatId: undefined, adId: undefined }))
+            : row.map((t, bi) =>
+                bi !== bIdx
+                  ? t
+                  : {
+                      ...t,
+                      kind: 'auto',
+                      chatId: undefined,
+                      adId: undefined,
+                      adKey: undefined,
+                      style: appliedStyle,
+                    }
+              )
         )
       );
     }
@@ -394,29 +475,16 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   };
 
   // Save List Settings and Ads
-  const handleSave = async () => {
+  const persistDraft = async ({ notify = true, refresh = true } = {}) => {
     if (!currentPattern.length) {
       toast('Adicione pelo menos um botão ao padrão.', 'error');
-      return;
+      return false;
     }
 
-    const layoutRows = rows
-      .filter((row) => row.length > 0)
-      .map((row) =>
-        row.map((token) => {
-          if (token.kind === 'chat' && Number.isSafeInteger(token.chatId)) {
-            return { kind: 'chat', chatId: token.chatId };
-          }
-          if (token.kind === 'ad' && Number.isSafeInteger(token.adId)) {
-            return { kind: 'ad', adId: token.adId };
-          }
-          return { kind: 'auto' };
-        })
-      );
-
-    if (layoutEnabled && !layoutRows.length) {
+    const hasLayoutRows = rows.some((row) => row.length > 0);
+    if (layoutEnabled && !hasLayoutRows) {
       toast('Adicione ao menos uma linha ao layout personalizado.', 'error');
-      return;
+      return false;
     }
 
     // Validate ads before saving
@@ -424,11 +492,11 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       const title = (ad.title || '').trim();
       if (!title) {
         toast('Dê um nome a todas as divulgações cadastradas.', 'error');
-        return;
+        return false;
       }
       if (!/^https:\/\/t\.me\//.test(ad.url || '')) {
         toast(`Informe um link do Telegram (https://t.me/…) para “${title}”.`, 'error');
-        return;
+        return false;
       }
     }
 
@@ -452,17 +520,96 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     }
 
     if (isDemo) {
-      toast('Organização da lista salva! (Modo Demo)', 'success');
-      return;
+      if (notify) toast('Organização da lista salva! (Modo Demo)', 'success');
+      return true;
     }
 
     try {
       setSaving(true);
       haptic('heavy');
 
+      let adKeyToId = new Map();
+      let nextListAdsConfig = listAdsConfig;
       if (upsert.length || remove.length) {
-        await callEndpoint('saveAds', { upsert, remove: [...new Set(remove)] });
+        const result = await callEndpoint('saveAds', {
+          upsert,
+          remove: [...new Set(remove)],
+        });
+        const savedAds = Array.isArray(result?.ads) ? result.ads : [];
+        if (savedAds.length) {
+          const byId = new Map(savedAds.map((ad) => [ad.id, ad]));
+          const byPosition = new Map(
+            savedAds.map((ad) => [`${ad.slot_row}_${ad.slot_col}`, ad])
+          );
+          const nextAds = ads.map((ad, index) => {
+            const row = 16 + Math.floor(index / 5);
+            const col = index % 5;
+            const savedAd =
+              (Number.isSafeInteger(ad.id) && byId.get(ad.id)) ||
+              byPosition.get(`${row}_${col}`) ||
+              (savedAds.length === ads.length ? savedAds[index] : null);
+            if (!savedAd) return ad;
+            if (!Number.isSafeInteger(ad.id) || ad.id <= 0) {
+              adKeyToId.set(ad.key, savedAd.id);
+            }
+            return {
+              ...ad,
+              id: savedAd.id,
+              slot_row: savedAd.slot_row,
+              slot_col: savedAd.slot_col,
+            };
+          });
+          const resolveAdId = (value) =>
+            Number.isSafeInteger(value) && adKeyToId.has(value)
+              ? adKeyToId.get(value)
+              : value;
+          nextListAdsConfig = {
+            ...listAdsConfig,
+            fixedAdId: resolveAdId(listAdsConfig.fixedAdId),
+            randomPool: (listAdsConfig.randomPool || []).map(resolveAdId),
+            slots: Object.fromEntries(
+              Object.entries(listAdsConfig.slots || {}).map(([key, slot]) => [
+                key,
+                { ...slot, adId: resolveAdId(slot?.adId) },
+              ])
+            ),
+          };
+          setAds(nextAds);
+          setListAdsConfig(nextListAdsConfig);
+          setRows((prev) =>
+            prev.map((row) =>
+              row.map((token) =>
+                token.kind === 'ad' && token.adKey && adKeyToId.has(token.adKey)
+                  ? { ...token, adId: adKeyToId.get(token.adKey), adKey: undefined }
+                  : token
+              )
+            )
+          );
+        }
       }
+
+      const layoutRows = rows
+        .filter((row) => row.length > 0)
+        .map((row) =>
+          row.map((token) => {
+            const style = BUTTON_STYLES.includes(token.style) ? token.style : '';
+            const styleFields = style ? { style } : {};
+            if (token.kind === 'chat' && Number.isSafeInteger(token.chatId)) {
+              return { kind: 'chat', chatId: token.chatId, ...styleFields };
+            }
+            if (token.kind === 'ad') {
+              const adId =
+                Number.isSafeInteger(token.adId) && token.adId > 0
+                  ? token.adId
+                  : adKeyToId.get(token.adKey);
+              if (!Number.isSafeInteger(adId) || adId <= 0) {
+                throw new Error('Salve a divulgação antes de fixá-la no layout.');
+              }
+              return { kind: 'ad', adId, ...styleFields };
+            }
+            return { kind: 'auto', ...styleFields };
+          })
+        );
 
       const updatedSettings = {
         ...data?.settings,
@@ -472,7 +619,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         rowPattern: currentPattern,
         columns: Math.max(1, ...currentPattern),
         listType,
-        listAdsConfig,
+        listAdsConfig: nextListAdsConfig,
         buttonLayout: {
           enabled: layoutEnabled,
           fill: layoutFill,
@@ -481,18 +628,47 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       };
 
       await saveSettingsSafe(updatedSettings, data?.version, onSyncVersion);
-      toast('Organização salva com sucesso!', 'success');
-      onRefresh?.();
+      if (notify) toast('Organização salva com sucesso!', 'success');
+      if (refresh) onRefresh?.();
+      return true;
     } catch (err) {
       toast(err.message || 'Falha ao salvar organização', 'error');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
+  const handleSave = async () => {
+    await persistDraft();
+  };
+
+  const handleTestLayout = async () => {
+    if (isDemo) {
+      toast('Modo Demo: layout de teste enviado para seu privado!', 'info');
+      return;
+    }
+    setTesting(true);
+    try {
+      haptic('medium');
+      const saved = await persistDraft({ notify: false, refresh: false });
+      if (!saved) return;
+      await callEndpoint('testList', {});
+      toast('Layout de teste enviado ao seu privado!', 'success');
+      onRefresh?.();
+    } catch (err) {
+      toast(err.message || 'Falha ao enviar o teste do layout', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
   // Preview Generation
-  const approvedChats = (data?.chats || []).filter((c) => c.status === 'approved');
-  const pinnableAds = ads.filter((ad) => Number.isSafeInteger(ad.id) && ad.id > 0);
+  const approvedChats = (data?.chats || []).filter(
+    (c) => c.status === 'approved' && isValidTelegramLink(c.url)
+  );
+  const usingPreviewFallback = approvedChats.length === 0;
+  const pinnableAds = ads;
   const fallbackChats = Array.from({ length: 12 }, (_, i) => ({
     id: i + 1,
     title: i % 2 === 0 ? `Canal ${i + 1}` : `Grupo ${i + 1}`,
@@ -500,111 +676,77 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     category: i % 4,
     type: i % 2 === 0 ? 'channel' : 'group',
     style: i % 3 === 0 ? 'primary' : i % 3 === 1 ? 'success' : '',
+    url: `https://t.me/demo${i + 1}`,
+    status: 'approved',
   }));
 
   const baseItems = (approvedChats.length ? approvedChats : fallbackChats).slice();
-
-  if (order === 'manual') {
-    baseItems.sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
-  } else {
-    baseItems.sort((a, b) => (a.display || a.title).localeCompare(b.display || b.title, 'pt-BR'));
-  }
-  if (groupCategories) {
-    baseItems.sort((a, b) => (a.category || 0) - (b.category || 0));
-  }
-
   const channelChats = baseItems.filter((c) => c.type === 'channel');
   const groupChats = baseItems.filter((c) => c.type === 'group' || c.type === 'supergroup');
 
   const activeItems = listType === 'simple'
-    ? (previewSimpleFilter === 'group'
-        ? (groupChats.length ? groupChats : baseItems)
-        : (channelChats.length ? channelChats : baseItems))
+    ? (previewSimpleFilter === 'group' ? groupChats : channelChats)
     : baseItems;
 
-  const previewTargetType =
-    listType === 'simple' &&
-    activeItems.length &&
-    activeItems.every((c) => (previewSimpleFilter === 'group' ? c.type !== 'channel' : c.type === 'channel'))
-      ? previewSimpleFilter
-      : '';
+  const previewTargetType = listType === 'simple' ? previewSimpleFilter : '';
 
   const draftLayoutRows = rows
     .filter((row) => row.length > 0)
     .map((row) =>
       row.map((token) => {
+        const style = BUTTON_STYLES.includes(token.style) ? token.style : '';
+        const styleFields = style ? { style } : {};
         if (token.kind === 'chat' && Number.isSafeInteger(token.chatId)) {
-          return { kind: 'chat', chatId: token.chatId };
+          return { kind: 'chat', chatId: token.chatId, ...styleFields };
         }
         if (token.kind === 'ad' && Number.isSafeInteger(token.adId)) {
-          return { kind: 'ad', adId: token.adId };
+          return { kind: 'ad', adId: token.adId, ...styleFields };
         }
-        return { kind: 'auto' };
+        if (token.kind === 'ad' && Number.isSafeInteger(token.adKey)) {
+          return { kind: 'ad', adKey: token.adKey, ...styleFields };
+        }
+        return { kind: 'auto', ...styleFields };
       })
     );
 
-  const makePreviewAdButton = (ad) => ({
-    text: String(ad.title || '').slice(0, 60),
-    url: ad.url,
-    style: ad.style || '',
-    isPreviewAd: true,
+  const previewSettings = {
+    ...(data?.settings || {}),
+    text: messageText,
+    order,
+    groupCategories,
+    rowPattern: currentPattern,
+    columns: Math.max(1, ...currentPattern),
+    listType,
+    listAdsConfig,
+    buttonLayout: {
+      enabled: layoutEnabled,
+      fill: layoutFill,
+      rows: draftLayoutRows,
+    },
+  };
+
+  const previewPages = buildPreviewPages({
+    chats: activeItems,
+    settings: previewSettings,
+    ads,
+    seed: 0,
+    botUsername: data?.bot?.username || '',
+    targetType: previewTargetType,
   });
+  const currentPreviewPage = clampPageIndex(previewPage, previewPages.length);
+  const currentPageRows = previewPages[currentPreviewPage]?.rows || [];
+  const currentPageText =
+    previewPages[currentPreviewPage]?.text ||
+    messageText ||
+    '<b>📢 Conheça nossos canais e grupos parceiros!</b>\n\n<blockquote>Toque nos botões abaixo para participar e conferir os conteúdos exclusivos.</blockquote>';
 
-  let previewRows;
-  if (layoutEnabled) {
-    const sequence = buildLayoutRows(
-      activeItems,
-      { enabled: true, fill: layoutFill, rows: draftLayoutRows },
-      ads,
-      0,
-      { targetType: previewTargetType }
-    );
-    previewRows = sequence.map((row) =>
-      row.map((cell) => (cell.kind === 'ad' ? makePreviewAdButton(cell.ad) : cell.chat))
-    );
-  } else {
-    const previewPattern = currentPattern.length ? currentPattern : [1];
-    const promoSlots = resolveListAds({ listAdsConfig }, ads, 0);
-    const hasNewAds = Boolean(promoSlots.start || promoSlots.middle || promoSlots.end);
-    previewRows = repeatRows(activeItems, previewPattern, []);
-    if (hasNewAds) {
-      if (promoSlots.end) {
-        previewRows.push([makePreviewAdButton(promoSlots.end)]);
-      }
-      if (promoSlots.middle) {
-        if (previewRows.length === 0) {
-          previewRows.push([makePreviewAdButton(promoSlots.middle)]);
-        } else {
-          const midIdx = Math.max(1, Math.floor(previewRows.length / 2));
-          previewRows.splice(midIdx, 0, [makePreviewAdButton(promoSlots.middle)]);
-        }
-      }
-      if (promoSlots.start) {
-        previewRows.unshift([makePreviewAdButton(promoSlots.start)]);
-      }
-    }
-  }
+  React.useEffect(() => {
+    setPreviewPage(0);
+  }, [layoutEnabled, layoutFill, listType, order, groupCategories, rows]);
 
-  // Default action buttons at the end of the list
-  const botUsername = data?.bot?.username || 'ListaMyBOT';
-  const botAddUrl = `https://t.me/${botUsername}?startgroup=true&admin=post_messages+edit_messages+delete_messages+pin_messages+invite_users`;
-  previewRows.push([
-    {
-      text: 'Add-me em C/G',
-      url: botAddUrl,
-      style: 'primary',
-      isPreviewAd: true,
-    },
-    {
-      text: 'Canal Oficial',
-      url: 'https://t.me/ChannelLogBM',
-      style: 'success',
-      isPreviewAd: true,
-    },
-  ]);
-
-  const previewPages = paginateRows(previewRows, 40, 20);
-  const currentPageRows = previewPages[previewPage] || [];
+  React.useEffect(() => {
+    setPreviewPage((page) => clampPageIndex(page, previewPages.length));
+  }, [previewPages.length]);
 
   return (
     <div className="space-y-4 pb-20 animate-in fade-in duration-300">
@@ -630,6 +772,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
             type="button"
             onClick={() => {
               haptic('selection');
+              setPreviewPage(0);
               setSubView('preview');
             }}
             className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
@@ -740,6 +883,16 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   Os botões fixos aparecem uma vez por lista. O restante dos participantes é
                   distribuído nos botões automáticos, repetindo o desenho quando necessário.
                 </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestLayout}
+                  disabled={saving || testing}
+                  className="w-full h-8 text-xs border-primary/30 text-primary hover:bg-primary/10"
+                >
+                  <Radio className="h-3.5 w-3.5 mr-1" />
+                  {testing ? 'Enviando teste...' : 'Salvar e testar no Telegram'}
+                </Button>
               </CardContent>
             )}
           </Card>
@@ -841,7 +994,14 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                 >
                   {row.map((token, bIdx) => {
                     const isSelected = selectedTokenKey === token.key;
-                    const ad = token.kind === 'ad' ? ads.find((a) => a.id === token.adId) : null;
+                    const ad =
+                      token.kind === 'ad'
+                        ? ads.find(
+                            (a) =>
+                              (Number.isSafeInteger(token.adId) && a.id === token.adId) ||
+                              (Number.isSafeInteger(token.adKey) && a.key === token.adKey)
+                          )
+                        : null;
                     const chat =
                       token.kind === 'chat'
                         ? (data?.chats || []).find((c) => Number(c.id) === Number(token.chatId))
@@ -884,6 +1044,15 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                             <Shuffle className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
                           )}
                           <span className="truncate">{label}</span>
+                          {token.style && (
+                            <span
+                              className={cn(
+                                'h-2 w-2 rounded-full shrink-0 ring-1 ring-white/20',
+                                STYLE_DOT_COLOR[token.style] || 'bg-slate-400'
+                              )}
+                              title="Cor personalizada deste botão"
+                            />
+                          )}
                         </span>
 
                         <div className="flex items-center gap-1 shrink-0 ml-1">
@@ -918,6 +1087,18 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                     );
                   })}
                 </div>
+
+                {rows.length < 15 && (
+                  <button
+                    type="button"
+                    onClick={() => handleInsertRow(rIdx)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-white/10 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:border-white/25 hover:bg-white/5 transition cursor-pointer"
+                    title="Inserir uma nova linha abaixo desta"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Nova Linha
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1122,6 +1303,11 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
           {/* Controls Bar */}
           <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-card border border-white/10">
             <div className="flex flex-wrap items-center gap-2 text-xs">
+              {usingPreviewFallback && (
+                <Badge variant="warning" className="text-[10px]">
+                  Dados fictícios
+                </Badge>
+              )}
               {listType === 'simple' && (
                 <div className="flex rounded-lg bg-black/20 p-1 border border-white/10">
                   <button
@@ -1193,20 +1379,20 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setPreviewPage((p) => Math.max(0, p - 1))}
-                  disabled={previewPage === 0}
+                  onClick={() => setPreviewPage((p) => Math.max(0, clampPageIndex(p, previewPages.length) - 1))}
+                  disabled={currentPreviewPage === 0}
                   className="h-7 px-2 border-white/10"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
                 <span className="font-mono text-muted-foreground">
-                  {previewPage + 1} / {previewPages.length}
+                  {currentPreviewPage + 1} / {previewPages.length}
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setPreviewPage((p) => Math.min(previewPages.length - 1, p + 1))}
-                  disabled={previewPage === previewPages.length - 1}
+                  onClick={() => setPreviewPage((p) => Math.min(previewPages.length - 1, clampPageIndex(p, previewPages.length) + 1))}
+                  disabled={currentPreviewPage === previewPages.length - 1}
                   className="h-7 px-2 border-white/10"
                 >
                   <ChevronRight className="h-3.5 w-3.5" />
@@ -1222,10 +1408,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               <div
                 className="text-sm leading-relaxed whitespace-pre-wrap break-words"
                 dangerouslySetInnerHTML={{
-                  __html: sanitizeTelegramHtml(
-                    messageText ||
-                    '<b>📢 Conheça nossos canais e grupos parceiros!</b>\n\n<blockquote>Toque nos botões abaixo para participar e conferir os conteúdos exclusivos.</blockquote>'
-                  ),
+                  __html: sanitizeTelegramHtml(currentPageText),
                 }}
               />
               <div className="flex justify-end items-center gap-1 text-[11px] text-slate-400">
@@ -1243,12 +1426,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
                 >
                   {row.map((btn, bIdx) => {
-                    const isAd = Boolean(btn.isPreviewAd);
-                    const rawStyle = isAd
-                      ? btn.style
-                      : previewColorMode === 'plain'
-                      ? ''
-                      : resolveStyle(btn, data?.settings);
+                    const rawStyle = previewColorMode === 'plain' ? '' : btn.style || '';
 
                     return (
                       <div
@@ -1263,9 +1441,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                             : 'bg-[#2b3c4f] hover:bg-[#34475e] text-slate-100'
                         }`}
                       >
-                        <span className="truncate">
-                          {isAd ? btn.text : btn.display || btn.title}
-                        </span>
+                        <span className="truncate">{btn.text}</span>
                         <ExternalLink className="h-3 w-3 shrink-0 ml-1 opacity-70" />
                       </div>
                     );
@@ -1869,25 +2045,30 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   <option value="">Selecione...</option>
                   {pinnableAds
                     .filter((ad) => {
-                      if (String(ad.id) === String(cellAdId)) return true;
+                      const option = adOptionValue(ad);
+                      if (option === cellAdId) return true;
                       return !rows.some((row) =>
-                        row.some((t) => t.kind === 'ad' && Number(t.adId) === Number(ad.id))
+                        row.some(
+                          (t) => t.kind === 'ad' && tokenAdValue(t) === option
+                        )
                       );
                     })
                     .map((ad) => (
-                      <option key={ad.key} value={ad.id}>
+                      <option key={ad.key} value={adOptionValue(ad)}>
                         🔆 {ad.title || 'Sem título'}
+                        {!Number.isSafeInteger(ad.id) || ad.id <= 0 ? ' (novo)' : ''}
                       </option>
                     ))}
                 </select>
               ) : (
                 <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-muted-foreground">
-                  Nenhuma divulgação salva. Crie a divulgação em “Configurar Divulgações” e salve a
-                  organização uma vez para poder fixá-la no layout.
+                  Nenhuma divulgação cadastrada. Adicione uma em “Configurar Divulgações” para
+                  fixá-la no layout.
                 </div>
               )}
               <p className="text-[11px] text-muted-foreground">
-                A divulgação aparece neste botão apenas uma vez por lista.
+                A divulgação aparece neste botão apenas uma vez por lista. Divulgações novas são
+                salvas junto com a organização.
               </p>
             </div>
           )}
@@ -1898,6 +2079,22 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               opção escolhida no layout (aleatório, canais ou grupos).
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground/90">Cor deste botão</label>
+            <ColorPicker
+              value={cellStyle}
+              onChange={setCellStyle}
+              inheritLabel="Herdar"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {cellKind === 'chat'
+                ? 'Se o C/G tiver uma cor individual definida na aba Canais, ela continua tendo prioridade.'
+                : cellKind === 'ad'
+                ? 'Esta cor prevalece sobre a cor cadastrada na divulgação.'
+                : 'Aplicada ao C/G sorteado. Se ele tiver cor individual na aba Canais, ela prevalece.'}
+            </p>
+          </div>
         </div>
 
         <DialogFooter>

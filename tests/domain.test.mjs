@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {DEFAULTS,DEFAULT_MAINTENANCE_MESSAGE,validateSettings,nextTime,makePages,permissionErrors,validLink,resolveCategories} from '../tgcloud/lib/domain.js';
 import {buildLayoutRows as buildBackendLayoutRows} from '../tgcloud/lib/layout.js';
-import {buildLayoutRows as buildPanelLayoutRows} from '../src/lib/layout.js';
+import {buildLayoutRows as buildPanelLayoutRows,clampPageIndex} from '../src/lib/layout.js';
 test('horários fixos usam UTC−3 e avançam ao próximo dia',()=>{const now=Date.parse('2026-10-13T23:00:00-03:00');assert.equal(new Date(nextTime({enabled:true,mode:'fixed',times:['09:00','20:00']},now)).toISOString(),'2026-10-14T12:00:00.000Z');});
 test('intervalo arbitrário de 90 minutos preserva a duração',()=>assert.equal(nextTime({enabled:true,mode:'interval',minutes:90},1000),5401000));
 test('validação rejeita configurações inválidas',()=>{assert.throws(()=>validateSettings({...DEFAULTS,columns:8}));assert.throws(()=>validateSettings({...DEFAULTS,schedule:{...DEFAULTS.schedule,times:['25:00']}}));assert.throws(()=>validateSettings({...DEFAULTS,admins:[NaN]}));});
@@ -9,6 +9,14 @@ test('IDs principais dos proprietários são preservados',()=>assert.deepEqual(v
 test('somente aprovados aparecem e os botões são divididos em páginas',()=>{const items=Array.from({length:85},(_,i)=>({id:i,title:'Canal '+i,url:'https://t.me/test'+i,status:i===0?'pending':'approved',category:0}));const pages=makePages(items,{...DEFAULTS,footerButtons:false});assert.equal(pages.length,3);assert.equal(pages.flatMap(p=>p.reply_markup.inline_keyboard.flat()).length,84);assert.ok(pages.every(p=>p.reply_markup.inline_keyboard.every(r=>r.length<=2)));});
 test('permissão para fixar difere entre canal e grupo',()=>{const m={status:'administrator',can_post_messages:true,can_delete_messages:true,can_pin_messages:true};assert.equal(permissionErrors({type:'channel'},m).length,1);assert.equal(permissionErrors({type:'supergroup'},m).length,0);assert.equal(permissionErrors({type:'channel'},{...m,can_edit_messages:true}).length,0);});
 test('somente links do Telegram são publicados',()=>{assert.equal(validLink('javascript:alert(1)'),false);assert.equal(validLink('https://t.me/+Abc_123'),true);assert.equal(validLink('https://t.me/testchannel'),true);assert.equal(validLink('https://t.me.evil.test/test'),false);});
+
+test('prévia limita a página atual quando a lista diminui',()=>{
+ assert.equal(clampPageIndex(0,0),0);
+ assert.equal(clampPageIndex(2,1),0);
+ assert.equal(clampPageIndex(1,3),1);
+ assert.equal(clampPageIndex(-2,3),0);
+ assert.equal(clampPageIndex(9,3),2);
+});
 
 test('padrão 1-2-1 repete em toda a lista e preserva último bloco parcial',()=>{
  const chats=Array.from({length:11},(_,i)=>({id:i,position:i,title:'Canal '+i,url:'https://t.me/canal'+i,status:'approved',category:0}));
@@ -322,7 +330,7 @@ test('layout do painel espelha exatamente o motor usado no envio', () => {
   enabled: true,
   fill: 'random',
   rows: [
-   [{ kind: 'chat', chatId: 2 }, { kind: 'ad', adId: 7 }, { kind: 'auto' }],
+   [{ kind: 'chat', chatId: 2, style: 'success' }, { kind: 'ad', adId: 7, style: 'danger' }, { kind: 'auto', style: 'primary' }],
    [{ kind: 'auto' }, { kind: 'auto' }]
   ]
  };
@@ -358,4 +366,82 @@ test('validação do layout rejeita posições e divulgações repetidas', () =>
  assert.deepEqual(kept.buttonLayout, saved.buttonLayout);
 });
 
+test('cor do botão do layout não sobrepõe a cor individual do C/G', () => {
+ const chats = [
+  { id: 1, title: 'Canal individual', type: 'channel', url: 'https://t.me/canalindividual', status: 'approved', category: 0, style: 'success' },
+  { id: 2, title: 'Canal layout', type: 'channel', url: 'https://t.me/canallayout', status: 'approved', category: 0 },
+  { id: 3, title: 'Grupo individual', type: 'group', url: 'https://t.me/grupoindividual', status: 'approved', category: 0 },
+  { id: 4, title: 'Canal auto', type: 'channel', url: 'https://t.me/canalauto', status: 'approved', category: 0 }
+ ];
+ const settings = {
+  ...DEFAULTS,
+  footerButtons: false,
+  channelColor: 'primary',
+  groupColor: 'primary',
+  buttonColor: 'primary',
+  chatColors: { 3: 'success' },
+  buttonLayout: {
+   enabled: true,
+   fill: 'random',
+   rows: [
+    [
+     { kind: 'chat', chatId: 1, style: 'danger' },
+     { kind: 'chat', chatId: 2, style: 'danger' },
+     { kind: 'chat', chatId: 3, style: 'danger' }
+    ],
+    [{ kind: 'auto', style: 'danger' }]
+   ]
+  }
+ };
+ const rows = makePages(chats, settings, 0)[0].reply_markup.inline_keyboard;
+ assert.equal(rows[0][0].style, 'success'); // cor individual do Chat vence
+ assert.equal(rows[0][1].style, 'danger'); // cor do layout vence a cor global de canal
+ assert.equal(rows[0][2].style, 'success'); // chatColors vence
+ assert.equal(rows[1][0].style, 'danger'); // automático usa a cor da célula
+});
+
+test('motor de layout aceita divulgação nova por adKey antes do salvamento', () => {
+ const chats = [
+  { id: 1, title: 'Canal A', type: 'channel', url: 'https://t.me/canala', status: 'approved', category: 0 },
+  { id: 2, title: 'Canal B', type: 'channel', url: 'https://t.me/canalb', status: 'approved', category: 0 }
+ ];
+ const newAd = {
+  key: 501,
+  title: 'Novo Parceiro',
+  url: 'https://t.me/novoparceiro',
+  style: 'success'
+ };
+ const settings = {
+  ...DEFAULTS,
+  footerButtons: false,
+  buttonLayout: {
+   enabled: true,
+   fill: 'random',
+   rows: [
+    [{ kind: 'ad', adKey: 501, style: 'danger' }, { kind: 'auto' }]
+   ]
+  }
+ };
+ const rows = makePages(chats, settings, 0, [newAd])[0].reply_markup.inline_keyboard;
+ assert.equal(rows[0][0].text, 'Novo Parceiro');
+ assert.equal(rows[0][0].style, 'danger');
+});
+
+test('validação preserva a cor da célula do layout e ignora valor inválido', () => {
+ const saved = validateSettings({
+  ...DEFAULTS,
+  buttonLayout: {
+   enabled: true,
+   fill: 'random',
+   rows: [
+    [
+     { kind: 'auto', style: 'danger' },
+     { kind: 'chat', chatId: 1, style: 'invalido' }
+    ]
+   ]
+  }
+ });
+ assert.equal(saved.buttonLayout.rows[0][0].style, 'danger');
+ assert.equal('style' in saved.buttonLayout.rows[0][1], false);
+});
 

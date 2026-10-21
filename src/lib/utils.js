@@ -5,6 +5,17 @@ export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
 
+// Mirrors tgcloud/lib/domain.js validLink so the panel preview excludes the
+// same chats the real Telegram send would ignore.
+export function isValidTelegramLink(value) {
+  return (
+    typeof value === 'string' &&
+    /^https:\/\/t\.me\/(?:[A-Za-z][A-Za-z0-9_]{3,}|\+[A-Za-z0-9_-]+|joinchat\/[A-Za-z0-9_-]+)\/?$/.test(
+      value
+    )
+  );
+}
+
 const TELEGRAM_ALLOWED_TAGS = new Set([
   'B', 'STRONG', 'I', 'EM', 'U', 'INS', 'S', 'STRIKE', 'DEL',
   'A', 'CODE', 'PRE', 'BLOCKQUOTE', 'SPAN', 'TG-SPOILER', 'TG-EMOJI', 'BR'
@@ -133,11 +144,12 @@ export const COLOR_OPTIONS = [
   { value: 'danger', label: 'Vermelho' },
 ];
 
-export function resolveStyle(c, s) {
+export function resolveStyle(c, s, layoutStyle = '') {
   if (!c) return '';
   const direct = c.style || s?.chatColors?.[c.id] || s?.chatColors?.[String(c.id)];
   if (direct && ['primary', 'danger', 'success'].includes(direct)) return direct;
   if (direct === 'none') return '';
+  if (['primary', 'danger', 'success'].includes(layoutStyle)) return layoutStyle;
   const isChannel = c.type === 'channel';
   const isGroup = c.type === 'group' || c.type === 'supergroup';
   if (isChannel && s?.channelColor && ['primary', 'danger', 'success'].includes(s.channelColor))
