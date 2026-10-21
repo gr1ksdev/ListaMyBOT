@@ -3,9 +3,9 @@ import { APP_URL, validLink, OWNER, OWNERS, isOwner, normalizeMaintenance, valid
 import { getChat, isAdmin, state, putState, isBanned, config } from '../lib/store.js';
 import { register, menu, chatAdmin } from '../lib/registration.js';
 import { screen, privateScreen, escHtml } from '../lib/navigation.js';
-import { parsePromoPayload, isPayloadLike, submitPromotion, ensurePromoTopic, promoTemplate, updatePromoConfig } from '../lib/promotions.js';
-import { ensureChatsTopic } from '../lib/chat_logs.js';
-import { getTicketByThreadId, getActiveTicketForUser, createTicket, closeTicket, relayUserMessage, relayAdminMessage, ensureSupportTopic } from '../lib/support.js';
+import { parsePromoPayload, isPayloadLike, submitPromotion, promoTemplate, updatePromoConfig } from '../lib/promotions.js';
+import { setupLogTopics, bindLogTopic, captureLogTopic } from '../lib/log_topics.js';
+import { getTicketByThreadId, getActiveTicketForUser, createTicket, closeTicket, relayUserMessage, relayAdminMessage } from '../lib/support.js';
 import { parseSendCommand, handleSendCommand, getSendHelpText, trackUser } from '../lib/broadcast.js';
 import { maintenanceGate, sendMaintenanceNotice } from '../lib/maintenance.js';
 // Explicit commands should answer at the bottom of the conversation. Inline
@@ -13,8 +13,18 @@ import { maintenanceGate, sendMaintenanceNotice } from '../lib/maintenance.js';
 export default async function(m){
  const rawText = (m.text || m.caption || '').trim();
  const { settings } = await config();
+ // Capture topic-creation service messages even during maintenance. This is a
+ // safety net for updates that time out right after createForumTopic.
+ if (m.forum_topic_created) {
+  try { await captureLogTopic(m); } catch (error) { console.warn('Falha ao registrar tópico criado:', error); }
+  if (!rawText) return;
+ }
+ const commandName = rawText.startsWith('/') ? rawText.split(/\s+/)[0].split('@')[0].toLowerCase() : '';
+ // Setup commands are authorized separately and must keep working during
+ // maintenance, including for administrators of the log group.
+ const setupCommands = ['/setlogs', '/setcanal', '/setdivulgacao', '/settopic'];
  const maintenance = maintenanceGate(settings, m.from?.id);
- if (maintenance.blocked) {
+ if (maintenance.blocked && !setupCommands.includes(commandName)) {
   // Do not flood groups/channels: outside private chats, only answer commands.
   const isPrivate = m.chat?.type === 'private';
   const isGroupCommand = ['group', 'supergroup'].includes(m.chat?.type) && rawText.startsWith('/');
@@ -85,81 +95,90 @@ async function handleMessage(m){
    await api.sendMessage({ chat_id: m.chat.id, text: 'Envie o comando dentro do grupo de logs ou informe o ID: <code>/setlogs -100xxxxxxxxxx</code>', parse_mode: 'HTML' });
    return;
   }
-  const currentCfg = await config();
-  const currentChatId = Number(currentCfg.settings.promoLogChat || 0);
-  const isSameGroup = currentChatId === Number(targetId);
-
-  let promoTopicId = isSameGroup ? Number(currentCfg.settings.promoLogTopic || 0) : 0;
-  let chatsTopicId = isSameGroup ? Number(currentCfg.settings.chatsLogTopic || 0) : 0;
-  let supportTopicId = isSameGroup ? Number(currentCfg.settings.supportLogTopic || 0) : 0;
-
-  const topicsList = [];
-  const errors = [];
-
-  if (promoTopicId > 0) {
-   topicsList.push(`• Divulgações pendentes (ID: <code>${promoTopicId}</code>) <i>[Já configurado]</i>`);
-  } else {
-   const promoRes = await ensurePromoTopic(targetId);
-   if (promoRes.ok && promoRes.topicId) {
-    promoTopicId = promoRes.topicId;
-    topicsList.push(`• Divulgações pendentes (ID: <code>${promoRes.topicId}</code>) <i>[Criado]</i>`);
-   } else if (promoRes.error) {
-    errors.push(`Divulgações: ${promoRes.error}`);
-   }
+  let result;
+  try {
+   result = await setupLogTopics(targetId);
+  } catch (err) {
+   result = { ok: false, error: err?.message || 'Erro inesperado ao configurar os tópicos.' };
   }
-
-  if (chatsTopicId > 0) {
-   topicsList.push(`• Cadastros pendentes (ID: <code>${chatsTopicId}</code>) <i>[Já configurado]</i>`);
-  } else {
-   if (promoTopicId > 0 && !isSameGroup) {
-    await new Promise(r => setTimeout(r, 1200));
-   }
-   const chatsRes = await ensureChatsTopic(targetId);
-   if (chatsRes.ok && chatsRes.topicId) {
-    chatsTopicId = chatsRes.topicId;
-    topicsList.push(`• Cadastros pendentes (ID: <code>${chatsRes.topicId}</code>) <i>[Criado]</i>`);
-   } else if (chatsRes.error) {
-    errors.push(`Cadastros: ${chatsRes.error}`);
-   }
+  if (!result.ok) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `❌ <b>Não foi possível configurar o grupo de logs.</b>\n\n${escHtml(result.error || 'Erro inesperado')}\n\n<i>Confira se o bot é administrador do grupo com a permissão "Gerenciar tópicos" e se o grupo tem tópicos ativados.</i>`,
+    parse_mode: 'HTML'
+   });
+   return;
   }
-
-  if (supportTopicId > 0) {
-   topicsList.push(`• Suporte & Dúvidas (ID: <code>${supportTopicId}</code>) <i>[Já configurado]</i>`);
-  } else {
-   if ((promoTopicId > 0 || chatsTopicId > 0) && (!isSameGroup || !chatsTopicId)) {
-    await new Promise(r => setTimeout(r, 1200));
+  const statusLabels = { existing: 'Já configurado', created: 'Criado', recreated: 'Recriado' };
+  const lines = result.topics.map(topic => {
+   if (topic.status === 'failed') {
+    return `• ${topic.name}: <b>Falhou</b> — <i>${escHtml(topic.error || 'erro desconhecido')}</i>`;
    }
-   const supportRes = await ensureSupportTopic(targetId);
-   if (supportRes.ok && supportRes.topicId) {
-    supportTopicId = supportRes.topicId;
-    topicsList.push(`• Suporte & Dúvidas (ID: <code>${supportRes.topicId}</code>) <i>[Criado]</i>`);
-   } else if (supportRes.error) {
-    errors.push(`Suporte: ${supportRes.error}`);
-   }
-  }
-
-  await updatePromoConfig({
-   promoLogChat: targetId,
-   promoLogTopic: promoTopicId,
-   chatsLogTopic: chatsTopicId,
-   supportLogTopic: supportTopicId
+   return `• ${topic.name} (ID: <code>${topic.topicId}</code>) <i>[${statusLabels[topic.status] || topic.status}]</i>`;
   });
-
-  if (topicsList.length > 0) {
-   await api.sendMessage({
-    chat_id: m.chat.id,
-    text: `✅ <b>Grupo de logs configurado com sucesso!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n📌 <b>Status dos tópicos:</b>\n${topicsList.join('\n')}` +
-     (errors.length ? `\n\n⚠️ <i>Avisos:</i>\n${errors.join('\n')}` : '') +
-     `\n\nTodas as solicitações de divulgação, cadastros e suporte serão enviadas para seus respectivos tópicos.`,
-    parse_mode: 'HTML'
-   });
-  } else {
-   await api.sendMessage({
-    chat_id: m.chat.id,
-    text: `✅ <b>Grupo de logs configurado!</b>\n\n🆔 Chat ID: <code>${targetId}</code>\n<i>Aviso: ${escHtml(errors.join(' | ') || 'O grupo não possui tópicos ativados.')} As mensagens serão enviadas no chat geral.</i>`,
-    parse_mode: 'HTML'
-   });
+  const failed = result.topics.filter(topic => topic.status === 'failed');
+  const title = failed.length
+   ? '⚠️ <b>Grupo de logs configurado parcialmente.</b>'
+   : '✅ <b>Grupo de logs configurado!</b>';
+  const summary = failed.length
+   ? `\n\n⚠️ <i>${failed.length} tópico(s) não puderam ser criados. Execute <code>/setlogs ${targetId}</code> novamente para tentar somente os que faltam.</i>`
+   : '\n\nTodas as solicitações de divulgação, cadastros e suporte serão enviadas para seus respectivos tópicos.';
+  await api.sendMessage({
+   chat_id: m.chat.id,
+   text: `${title}\n\n🆔 Chat ID: <code>${targetId}</code>\n📌 <b>Status dos tópicos:</b>\n${lines.join('\n')}${summary}`,
+   parse_mode: 'HTML'
+  });
+  return;
+ }
+ if (cmd === '/settopic' || cmd === '/settopicos') {
+  const isBotAdm = await isAdmin(user);
+  const isChatAdm = m.chat.id < 0 ? await chatAdmin(m.chat.id, user) : false;
+  if (!isBotAdm && !isChatAdm) {
+   await api.sendMessage({ chat_id: m.chat.id, text: 'Apenas administradores podem vincular tópicos.' });
+   return;
   }
+  const aliases = {
+   promo: 'promo', divulgacao: 'promo', divulgacoes: 'promo', divulgação: 'promo', divulgações: 'promo',
+   chats: 'chats', cadastro: 'chats', cadastros: 'chats',
+   support: 'support', suporte: 'support', duvida: 'support', duvidas: 'support', dúvida: 'support', dúvidas: 'support'
+  };
+  const kind = aliases[(args[0] || '').toLowerCase()];
+  if (!kind) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `ℹ️ <b>Vincular tópico existente</b>\n\n` +
+     `Use <code>/settopic promo</code>, <code>/settopic cadastros</code> ou <code>/settopic suporte</code> dentro do tópico correspondente.\n\n` +
+     `Também é possível informar o ID: <code>/settopic suporte 12345</code> (no grupo) ou <code>/settopic suporte 12345 -100...</code> (no privado).`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  let groupId = m.chat.id < 0 ? m.chat.id : 0;
+  let topicId = m.message_thread_id || 0;
+  for (const value of args.slice(1)) {
+   if (!/^-?\d+$/.test(value)) continue;
+   const number = Number(value);
+   if (number < 0) groupId = number;
+   else if (!topicId) topicId = number;
+  }
+  if (!groupId || !topicId) {
+   await api.sendMessage({
+    chat_id: m.chat.id,
+    text: `ℹ️ Abra o tópico no grupo de logs e envie <code>/settopic ${args[0] || 'suporte'}</code>, ou informe os IDs: <code>/settopic ${args[0] || 'suporte'} 12345 -100...</code>`,
+    parse_mode: 'HTML'
+   });
+   return;
+  }
+  const result = await bindLogTopic(groupId, kind, topicId);
+  if (!result.ok) {
+   await api.sendMessage({ chat_id: m.chat.id, text: `❌ <b>Não foi possível vincular o tópico.</b>\n\n${escHtml(result.error || 'Erro inesperado')}`, parse_mode: 'HTML' });
+   return;
+  }
+  await api.sendMessage({
+   chat_id: m.chat.id,
+   text: `✅ <b>Tópico vinculado!</b>\n\n📌 ${result.name}\n🆔 Tópico: <code>${result.topicId}</code>\n🆔 Grupo: <code>${groupId}</code>`,
+   parse_mode: 'HTML'
+  });
   return;
  }
  if (cmd === '/setcanal' || cmd === '/setdivulgacao') {

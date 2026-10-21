@@ -2,43 +2,11 @@ import { api, db } from 'sdk';
 import { APP_URL, CATEGORIES, resolveCategories } from './domain.js';
 import { config, putState, state } from './store.js';
 import { escHtml } from './navigation.js';
+import { ensureLogTopic } from './log_topics.js';
 
 export async function ensureChatsTopic(logChatId) {
   if (!logChatId) return { ok: false, error: 'Grupo de logs não configurado.' };
-  try {
-    const chat = await api.getChat({ chat_id: logChatId });
-    if (!chat.is_forum) {
-      return { ok: false, isForum: false, error: 'O grupo não tem tópicos ativados (não é um supergrupo com fórum).' };
-    }
-    const me = await api.getMe();
-    const member = await api.getChatMember({ chat_id: logChatId, user_id: me.id });
-    if (member.status !== 'creator' && !member.can_manage_topics) {
-      return { ok: false, isForum: true, error: 'O bot precisa da permissão "Gerenciar tópicos" (can_manage_topics) como administrador.' };
-    }
-    let topic;
-    try {
-      topic = await api.createForumTopic({
-        chat_id: logChatId,
-        name: 'Cadastros pendentes',
-        icon_color: 9367192
-      });
-    } catch (createErr) {
-      if (createErr.parameters?.retry_after) {
-        const waitMs = (createErr.parameters.retry_after + 1) * 1000;
-        await new Promise(r => setTimeout(r, Math.min(waitMs, 5000)));
-        topic = await api.createForumTopic({
-          chat_id: logChatId,
-          name: 'Cadastros pendentes',
-          icon_color: 9367192
-        });
-      } else {
-        throw createErr;
-      }
-    }
-    return { ok: true, isForum: true, topicId: topic.message_thread_id, name: topic.name };
-  } catch (err) {
-    return { ok: false, error: err.description || err.message };
-  }
+  return ensureLogTopic(logChatId, 'chats');
 }
 
 export function formatChatSubmissionMessage(c, memberCount, actor, status = 'pending', reviewer = null, categories = CATEGORIES) {
@@ -137,8 +105,6 @@ export async function sendChatSubmissionLog(c, actor) {
       const topicRes = await ensureChatsTopic(logChat);
       if (topicRes.ok && topicRes.topicId) {
         topicId = topicRes.topicId;
-        cfg.settings.chatsLogTopic = topicId;
-        await db.run('UPDATE list_settings SET value=:v,version=version+1 WHERE id=1', { ':v': JSON.stringify(cfg.settings) });
       }
     } catch (e) {
       console.warn('Erro ao criar tópico de cadastros pendentes:', e);

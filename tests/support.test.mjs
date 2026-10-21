@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 
-let sql, calls, sent, isForum, canManageTopics, topicCount;
+let sql, calls, sent, isForum, canManageTopics, topicCount, failTopicName, missingTopicIds;
 const sdk = {
   db: {
     async get(q, p = {}) { return sql.prepare(q).get(p) || null; },
@@ -30,7 +30,13 @@ const sdk = {
           };
         }
         if (name === 'createForumTopic') {
+          if (failTopicName && String(p.name || '').includes(failTopicName)) {
+            throw Object.assign(new Error('Falha simulada ao criar tópico'), { description: 'Falha simulada ao criar tópico' });
+          }
           return { message_thread_id: ++topicCount, name: p.name || 'Suporte & Dúvidas' };
+        }
+        if (name === 'sendMessage' && p.message_thread_id && missingTopicIds.has(Number(p.message_thread_id))) {
+          throw Object.assign(new Error('Bad Request: message thread not found'), { description: 'Bad Request: message thread not found' });
         }
         if (name === 'deleteForumTopic' || name === 'closeForumTopic' || name === 'reopenForumTopic') {
           return true;
@@ -119,6 +125,8 @@ beforeEach(() => {
   calls = [];
   sent = 0;
   topicCount = 500;
+  failTopicName = null;
+  missingTopicIds = new Set();
   isForum = true;
   canManageTopics = true;
 });
@@ -574,6 +582,131 @@ test('/setlogs no mesmo grupo preserva tópicos existentes e só cria os faltant
   assert.match(confirmMsg.p.text, /Divulgações pendentes \(ID: <code>888<\/code>\) <i>\[Já configurado\]<\/i>/);
   assert.match(confirmMsg.p.text, /Cadastros pendentes \(ID: <code>777<\/code>\) <i>\[Já configurado\]<\/i>/);
   assert.match(confirmMsg.p.text, /Suporte & Dúvidas \(ID: <code>\d+<\/code>\) <i>\[Criado\]<\/i>/);
+});
+
+test('/setlogs cria os três tópicos ausentes e grava cada ID', async () => {
+  sql.prepare('UPDATE list_settings SET value = ? WHERE id = 1').run(JSON.stringify({ ...DEFAULTS }));
+  calls = [];
+
+  await message({
+    text: '/setlogs -1001234567890',
+    chat: { id: -1001234567890, type: 'supergroup' },
+    from: { id: OWNER, first_name: 'Admin Gabriel' }
+  });
+
+  const creations = calls.filter(c => c.name === 'createForumTopic');
+  assert.deepEqual(creations.map(c => c.p.name), ['Divulgações pendentes', 'Cadastros pendentes', 'Suporte & Dúvidas']);
+
+  const saved = JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id = 1').get().value);
+  assert.equal(saved.promoLogChat, -1001234567890);
+  assert.ok(saved.promoLogTopic > 0);
+  assert.ok(saved.chatsLogTopic > 0);
+  assert.ok(saved.supportLogTopic > 0);
+
+  const confirm = calls.find(c => c.name === 'sendMessage' && c.p.text?.includes('Status dos tópicos'));
+  assert.ok(confirm);
+  assert.equal((confirm.p.text.match(/\[Criado\]/g) || []).length, 3);
+});
+
+test('/setlogs persiste os tópicos já criados quando um deles falha', async () => {
+  sql.prepare('UPDATE list_settings SET value = ? WHERE id = 1').run(JSON.stringify({ ...DEFAULTS }));
+  failTopicName = 'Cadastros pendentes';
+  calls = [];
+
+  await message({
+    text: '/setlogs -1001234567890',
+    chat: { id: -1001234567890, type: 'supergroup' },
+    from: { id: OWNER, first_name: 'Admin Gabriel' }
+  });
+
+  let saved = JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id = 1').get().value);
+  assert.ok(saved.promoLogTopic > 0, 'divulgações devem ser gravadas mesmo com falha depois');
+  assert.equal(saved.chatsLogTopic, 0, 'cadastros falharam e devem continuar pendentes');
+  assert.ok(saved.supportLogTopic > 0, 'suporte deve ser tentado depois da falha');
+  const firstReport = calls.find(c => c.name === 'sendMessage' && c.p.text?.includes('Status dos tópicos'));
+  assert.match(firstReport.p.text, /Cadastros pendentes: <b>Falhou<\/b>/);
+  assert.match(firstReport.p.text, /novamente para tentar somente os que faltam/);
+
+  failTopicName = null;
+  calls = [];
+  await message({
+    text: '/setlogs -1001234567890',
+    chat: { id: -1001234567890, type: 'supergroup' },
+    from: { id: OWNER, first_name: 'Admin Gabriel' }
+  });
+
+  const retryCreations = calls.filter(c => c.name === 'createForumTopic');
+  assert.deepEqual(retryCreations.map(c => c.p.name), ['Cadastros pendentes'], 'a segunda execução deve criar somente o que faltou');
+  saved = JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id = 1').get().value);
+  assert.ok(saved.promoLogTopic > 0);
+  assert.ok(saved.chatsLogTopic > 0);
+  assert.ok(saved.supportLogTopic > 0);
+  const retryReport = calls.find(c => c.name === 'sendMessage' && c.p.text?.includes('Status dos tópicos'));
+  assert.equal((retryReport.p.text.match(/\[Já configurado\]/g) || []).length, 2);
+  assert.equal((retryReport.p.text.match(/\[Criado\]/g) || []).length, 1);
+});
+
+test('/setlogs recria um tópico salvo que foi apagado do grupo', async () => {
+  const currentSettings = {
+    ...DEFAULTS,
+    promoLogChat: -1001234567890,
+    promoLogTopic: 888,
+    chatsLogTopic: 777,
+    supportLogTopic: 501
+  };
+  sql.prepare('UPDATE list_settings SET value = ? WHERE id = 1').run(JSON.stringify(currentSettings));
+  missingTopicIds.add(888);
+  calls = [];
+
+  await message({
+    text: '/setlogs -1001234567890',
+    chat: { id: -1001234567890, type: 'supergroup' },
+    from: { id: OWNER, first_name: 'Admin Gabriel' }
+  });
+
+  const creations = calls.filter(c => c.name === 'createForumTopic');
+  assert.deepEqual(creations.map(c => c.p.name), ['Divulgações pendentes']);
+  const saved = JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id = 1').get().value);
+  assert.notEqual(saved.promoLogTopic, 888);
+  assert.ok(saved.promoLogTopic > 0);
+  assert.equal(saved.chatsLogTopic, 777);
+  assert.equal(saved.supportLogTopic, 501);
+  const confirm = calls.find(c => c.name === 'sendMessage' && c.p.text?.includes('Status dos tópicos'));
+  assert.match(confirm.p.text, /Divulgações pendentes.*\[Recriado\]/);
+});
+
+test('mensagem de serviço forum_topic_created registra o tópico criado', async () => {
+  const currentSettings = { ...DEFAULTS, promoLogChat: -1001234567890, supportLogTopic: 0 };
+  sql.prepare('UPDATE list_settings SET value = ? WHERE id = 1').run(JSON.stringify(currentSettings));
+  calls = [];
+
+  await message({
+    forum_topic_created: { name: 'Suporte & Dúvidas' },
+    message_thread_id: 999,
+    chat: { id: -1001234567890, type: 'supergroup' },
+    from: { id: OWNER, first_name: 'Admin Gabriel' }
+  });
+
+  const saved = JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id = 1').get().value);
+  assert.equal(saved.supportLogTopic, 999);
+});
+
+test('/settopic vincula um tópico existente aberto no próprio tópico', async () => {
+  const currentSettings = { ...DEFAULTS, promoLogChat: 0, supportLogTopic: 0 };
+  sql.prepare('UPDATE list_settings SET value = ? WHERE id = 1').run(JSON.stringify(currentSettings));
+  calls = [];
+
+  await message({
+    text: '/settopic suporte',
+    chat: { id: -1001234567890, type: 'supergroup' },
+    from: { id: OWNER, first_name: 'Admin Gabriel' },
+    message_thread_id: 501
+  });
+
+  const saved = JSON.parse(sql.prepare('SELECT value FROM list_settings WHERE id = 1').get().value);
+  assert.equal(saved.promoLogChat, -1001234567890);
+  assert.equal(saved.supportLogTopic, 501);
+  assert.ok(calls.some(c => c.name === 'sendMessage' && c.p.text?.includes('Tópico vinculado')));
 });
 
 test('relay de mensagens com mídia aplica alusão ao remetente na legenda', async () => {

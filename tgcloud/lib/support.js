@@ -1,7 +1,7 @@
 import { api, db } from 'sdk';
 import { config } from './store.js';
 import { escHtml } from './domain.js';
-import { updatePromoConfig } from './promotions.js';
+import { ensureLogTopic } from './log_topics.js';
 
 export async function initTicketsTable() {
   await db.run(`
@@ -38,40 +38,7 @@ export function generateTicketCode() {
 
 export async function ensureSupportTopic(logChatId) {
   if (!logChatId) return { ok: false, error: 'Grupo de logs não configurado.' };
-  try {
-    const chat = await api.getChat({ chat_id: logChatId });
-    if (!chat.is_forum) {
-      return { ok: false, isForum: false, error: 'O grupo não tem tópicos ativados (não é um supergrupo com fórum).' };
-    }
-    const me = await api.getMe();
-    const member = await api.getChatMember({ chat_id: logChatId, user_id: me.id });
-    if (member.status !== 'creator' && !member.can_manage_topics) {
-      return { ok: false, isForum: true, error: 'O bot precisa da permissão "Gerenciar tópicos" (can_manage_topics) como administrador.' };
-    }
-    let topic;
-    try {
-      topic = await api.createForumTopic({
-        chat_id: logChatId,
-        name: 'Suporte & Dúvidas',
-        icon_color: 7322096
-      });
-    } catch (createErr) {
-      if (createErr.parameters?.retry_after) {
-        const waitMs = (createErr.parameters.retry_after + 1) * 1000;
-        await new Promise(r => setTimeout(r, Math.min(waitMs, 5000)));
-        topic = await api.createForumTopic({
-          chat_id: logChatId,
-          name: 'Suporte & Dúvidas',
-          icon_color: 7322096
-        });
-      } else {
-        throw createErr;
-      }
-    }
-    return { ok: true, isForum: true, topicId: topic.message_thread_id, name: topic.name };
-  } catch (err) {
-    return { ok: false, error: err.description || err.message };
-  }
+  return ensureLogTopic(logChatId, 'support');
 }
 
 export async function getActiveTicketForUser(userId) {
@@ -120,8 +87,6 @@ export async function createTicket(user, initialText) {
       const topicRes = await ensureSupportTopic(logChat);
       if (topicRes.ok && topicRes.topicId) {
         supportTopicId = topicRes.topicId;
-        cfg.settings.supportLogTopic = supportTopicId;
-        await updatePromoConfig({ supportLogTopic: supportTopicId });
       }
     } catch (e) {
       console.warn('Erro ao criar tópico de suporte:', e);
