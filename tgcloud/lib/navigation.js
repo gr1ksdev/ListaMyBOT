@@ -119,14 +119,19 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
   const channelsCount = list.filter(c => c.type === 'channel').length;
   const groupsCount = list.filter(c => c.type === 'group' || c.type === 'supergroup').length;
   const regDate = await getUserRegDate(user);
+  const rawName = fromUser?.first_name || await state(`user_name:${user}`, '') || 'Amigo';
 
-  text = `👤 ${tgLink('Meu Perfil')} • <b><i>Visão Geral dos seus ${tgLink('Canais')} e ${tgLink('Grupos')}</i></b>\n\n` +
-   `<blockquote><b>📊 Estatísticas da Conta\n` +
-   ` ┣ 📢 Canais • ${channelsCount}\n` +
-   ` ┗ 💬 Grupos • ${groupsCount}\n` +
-   `📅 Registro • ${regDate}\n` +
-   `</b></blockquote>\n\n` +
-   `<b><i>🚀 Gerencie suas comunidades conectadas tocando nos botões abaixo:</i></b>`;
+  text = `👤 <b>Central do Usuário</b>\n` +
+   `━━━━━━━━━━━━━━━━━━\n\n` +
+   `<blockquote><b>📊 Visão geral da conta</b>\n\n` +
+   `┣ 🪪 Perfil: ${escHtml(rawName)}\n` +
+   `┣ 🆔 ID: <code>${user}</code>\n` +
+   `┗ 📅 Desde: ${regDate}</blockquote>\n\n` +
+   `<blockquote><b>📡 Suas conexões</b>\n` +
+   `┣ 📢 Canais vinculados: ${channelsCount}\n` +
+   `┗ 💬 Grupos vinculados: ${groupsCount}</blockquote>\n\n` +
+   `━━━━━━━━━━━━━━━━━━\n` +
+   `⚙️ <i>Acesse o menu abaixo para administrar suas conexões e gerenciar suas comunidades.</i>`;
 
   rows.push([
    { text: '📢 Canais', callback_data: 'nav:channels' },
