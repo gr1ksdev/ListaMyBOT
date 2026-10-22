@@ -147,15 +147,35 @@ test('teste sem dados fictícios não envia aviso quando a lista real basta', as
   assert.deepEqual(buttons().map(b => b.text).sort(), ['Canal A', 'Canal B']);
 });
 
-test('teste do modo simples envia canais e grupos fictícios separadamente', async () => {
-  saveSettings({ listType: 'simple', footerButtons: false, buttonLayout: { enabled: false } });
+test('teste ignora o antigo modo simples e envia uma única lista fictícia', async () => {
+  saveSettings({ listType: 'simple', footerButtons: false, buttonLayout: twoAutoCells });
 
   await testList({}, adminCtx);
 
-  const texts = messages().map(m => m.text);
-  assert.ok(texts.some(t => /Lista Simples — Canais/.test(t)));
-  assert.ok(texts.some(t => /Lista Simples — Grupos/.test(t)));
+  assert.equal(messages().length, 1);
+  assert.equal(buttons().length, 2);
+  assert.ok(!messages()[0].text.includes('Lista Simples'));
   assert.ok(buttons().some(b => /^Canal de Teste/.test(b.text)));
   assert.ok(buttons().some(b => /^Grupo de Teste/.test(b.text)));
   assert.equal(sql.prepare('SELECT count(*) AS n FROM list_chats').get().n, 0);
+});
+
+test('teste cria divulgações fictícias para posição fixa e aleatória sem repetir', async () => {
+  saveSettings({
+    footerButtons: false,
+    buttonLayout: {
+      enabled: true,
+      fill: 'random',
+      rows: [[{ kind: 'ad', adId: 77 }], [{ kind: 'adRandom' }]]
+    }
+  });
+
+  await testList({}, adminCtx);
+
+  assert.equal(messages().length, 1);
+  const adButtons = buttons().filter(b => /Divulgação de Teste/.test(b.text));
+  assert.equal(adButtons.length, 2);
+  assert.equal(new Set(adButtons.map(b => b.text)).size, 2);
+  assert.ok(adButtons.some(b => b.text === 'Divulgação de Teste 1'));
+  assert.ok(adButtons.some(b => b.text === 'Divulgação de Teste 2'));
 });

@@ -10,12 +10,9 @@ import {
   ChevronDown,
   ExternalLink,
   Megaphone,
-  Check,
-  RotateCcw,
   SlidersHorizontal,
   Layers,
   Shuffle,
-  Pin,
   Sparkles,
   Pencil,
   Tag,
@@ -32,7 +29,7 @@ import { Checkbox } from './ui/Checkbox';
 import { Switch } from './ui/Switch';
 import { useToast } from './ui/Toast';
 import { callEndpoint, saveSettingsSafe, haptic } from '@/lib/telegram';
-import { layoutPattern, clampPageIndex } from '@/lib/layout';
+import { defaultLayoutRows, clampPageIndex } from '@/lib/layout';
 import { buildPreviewPages } from '@/lib/preview';
 import { sanitizeTelegramHtml, cn, isValidTelegramLink } from '@/lib/utils';
 
@@ -64,24 +61,9 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   const [selectedTokenKey, setSelectedTokenKey] = React.useState(null);
   const [expandedAdKeys, setExpandedAdKeys] = React.useState(() => new Set());
 
-  // List Type & Final List Promotions
-  const [listType, setListType] = React.useState('mixed'); // 'mixed' | 'simple'
-  const [listAdsConfig, setListAdsConfig] = React.useState({
-    enabled: false,
-    mode: 'fixed',
-    sameAdAcrossSlots: true,
-    slots: {
-      start: { enabled: true, adId: null },
-      middle: { enabled: false, adId: null },
-      end: { enabled: true, adId: null },
-    },
-    randomPool: [],
-    fixedAdId: null,
-  });
-
   // Custom button layout (the drawing used as the final list)
-  const [layoutEnabled, setLayoutEnabled] = React.useState(false);
   const [layoutFill, setLayoutFill] = React.useState('random'); // 'random' | 'group' | 'channel'
+  const [layoutRotate, setLayoutRotate] = React.useState(false);
   const [cellEditor, setCellEditor] = React.useState(null); // { rIdx, bIdx }
   const [cellKind, setCellKind] = React.useState('auto');
   const [cellChatId, setCellChatId] = React.useState('');
@@ -96,7 +78,6 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   // Preview state
   const [previewPage, setPreviewPage] = React.useState(0);
   const [previewColorMode, setPreviewColorMode] = React.useState('telegram');
-  const [previewSimpleFilter, setPreviewSimpleFilter] = React.useState('channel'); // 'channel' | 'group'
 
   // Modals
   const [adsModalOpen, setAdsModalOpen] = React.useState(false);
@@ -130,26 +111,11 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     if (!data?.settings) return;
     const s = data.settings;
     setMessageText(s.text || '');
-    setOrder(s.order || 'alphabetical');
+    setOrder(s.order === 'manual' ? 'manual' : 'alphabetical');
     setGroupCategories(Boolean(s.groupCategories));
-    setListType(s.listType || 'mixed');
-    setLayoutEnabled(Boolean(s.buttonLayout?.enabled));
     setLayoutFill(['random', 'group', 'channel'].includes(s.buttonLayout?.fill) ? s.buttonLayout.fill : 'random');
+    setLayoutRotate(Boolean(s.buttonLayout?.rotate));
     setCellEditor(null);
-
-    const lac = s.listAdsConfig || {};
-    setListAdsConfig({
-      enabled: Boolean(lac.enabled),
-      mode: lac.mode === 'random' ? 'random' : 'fixed',
-      sameAdAcrossSlots: Boolean(lac.sameAdAcrossSlots ?? true),
-      slots: {
-        start: { enabled: Boolean(lac.slots?.start?.enabled ?? true), adId: lac.slots?.start?.adId || null },
-        middle: { enabled: Boolean(lac.slots?.middle?.enabled ?? false), adId: lac.slots?.middle?.adId || null },
-        end: { enabled: Boolean(lac.slots?.end?.enabled ?? true), adId: lac.slots?.end?.adId || null },
-      },
-      randomPool: Array.isArray(lac.randomPool) ? lac.randomPool : [],
-      fixedAdId: lac.fixedAdId || null,
-    });
 
     const initialAds = (data.ads || []).map((a) => ({
       id: a.id,
@@ -165,35 +131,42 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
 
     const savedLayout = Array.isArray(s.buttonLayout?.rows) ? s.buttonLayout.rows : [];
     let initialRows = savedLayout.length
-      ? savedLayout.map((row) =>
-          row.map((cell) => {
-            const style = BUTTON_STYLES.includes(cell?.style) ? cell.style : '';
-            if (cell?.kind === 'chat' && Number.isSafeInteger(cell.chatId)) {
-              return { key: nextKey(), kind: 'chat', chatId: cell.chatId, style };
-            }
-            if (cell?.kind === 'ad' && Number.isSafeInteger(cell.adId)) {
-              const stillExists = initialAds.some((a) => Number(a.id) === cell.adId);
-              return stillExists
-                ? { key: nextKey(), kind: 'ad', adId: cell.adId, style }
-                : { key: nextKey(), kind: 'auto', style };
-            }
-            return { key: nextKey(), kind: 'auto', style };
-          })
-        )
+      ? savedLayout
+          .map((row) =>
+            row
+              .map((cell) => {
+                const style = BUTTON_STYLES.includes(cell?.style) ? cell.style : '';
+                if (cell?.kind === 'chat' && Number.isSafeInteger(cell.chatId)) {
+                  return { key: nextKey(), kind: 'chat', chatId: cell.chatId, style };
+                }
+                if (cell?.kind === 'ad' && Number.isSafeInteger(cell.adId)) {
+                  const stillExists = initialAds.some((a) => Number(a.id) === cell.adId);
+                  return stillExists
+                    ? { key: nextKey(), kind: 'ad', adId: cell.adId, style }
+                    : null;
+                }
+                if (cell?.kind === 'adRandom') {
+                  return { key: nextKey(), kind: 'adRandom', style };
+                }
+                return { key: nextKey(), kind: 'auto', style };
+              })
+              .filter(Boolean)
+          )
+          .filter((row) => row.length)
       : [];
 
     if (!initialRows.length) {
-      const pattern = layoutPattern(s);
-      initialRows = pattern.map((count) =>
-        Array.from({ length: count }, () => ({ key: nextKey(), kind: 'auto' }))
+      initialRows = defaultLayoutRows().map((row) =>
+        row.map(() => ({ key: nextKey(), kind: 'auto' }))
       );
     }
 
-    if (!initialRows.length) initialRows.push([{ key: nextKey(), kind: 'auto' }]);
     setRows(initialRows);
   }, [data]);
 
   const currentPattern = rows.filter((r) => r.length > 0).map((r) => r.length);
+  const layoutAdCells = rows.flat().filter((t) => t.kind === 'ad' || t.kind === 'adRandom').length;
+  const layoutChatCells = rows.flat().filter((t) => t.kind !== 'ad' && t.kind !== 'adRandom').length;
 
   // Row operations
   const handleAddRow = () => {
@@ -329,36 +302,37 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       next.delete(ad.key);
       return next;
     });
-    // Safely replace any ad token in the grid with an automatic slot instead of
-    // deleting the cell, so the drawn row width is preserved.
-    setRows((prev) =>
-      prev.map((row) =>
-        row.map((t) => {
-          const matches =
-            t.kind === 'ad' &&
-            ((ad.id && t.adId === ad.id) || t.adKey === ad.key);
-          return matches
-            ? { key: nextKey(), kind: 'auto', ...(t.style ? { style: t.style } : {}) }
-            : t;
-        })
-      )
-    );
-    setCellEditor(null);
-    setListAdsConfig((prev) => {
-      const updated = { ...prev };
-      if (updated.fixedAdId === idVal) updated.fixedAdId = null;
-      if (updated.randomPool) {
-        updated.randomPool = updated.randomPool.filter((x) => x !== idVal);
+    setRows((prev) => {
+      let next = prev
+        .map((row) =>
+          row.filter((t) => {
+            const matches =
+              t.kind === 'ad' &&
+              ((ad.id && t.adId === ad.id) || t.adKey === ad.key);
+            return !matches;
+          })
+        )
+        .filter((row) => row.length);
+
+      // Removing an ad can leave more random-ad positions than registered ads.
+      // Trim the extra random positions from the end instead of converting them
+      // into chat buttons.
+      let excess =
+        next.flat().filter((t) => t.kind === 'ad' || t.kind === 'adRandom').length -
+        (ads.length - 1);
+      for (let r = next.length - 1; r >= 0 && excess > 0; r--) {
+        for (let b = next[r].length - 1; b >= 0 && excess > 0; b--) {
+          if (next[r][b].kind === 'adRandom') {
+            next[r].splice(b, 1);
+            excess--;
+          }
+        }
       }
-      if (updated.slots) {
-        const s = { ...updated.slots };
-        if (s.start?.adId === idVal) s.start = { ...s.start, adId: null };
-        if (s.middle?.adId === idVal) s.middle = { ...s.middle, adId: null };
-        if (s.end?.adId === idVal) s.end = { ...s.end, adId: null };
-        updated.slots = s;
-      }
-      return updated;
+      next = next.filter((row) => row.length);
+      if (!next.length) next = [[{ key: nextKey(), kind: 'auto' }]];
+      return next;
     });
+    setCellEditor(null);
   };
 
   const openCellEditor = (rIdx, bIdx) => {
@@ -376,6 +350,33 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     if (!cellEditor) return;
     const { rIdx, bIdx } = cellEditor;
     const appliedStyle = BUTTON_STYLES.includes(cellStyle) ? cellStyle : undefined;
+    const current = rows[rIdx]?.[bIdx];
+    const currentIsAd = current?.kind === 'ad' || current?.kind === 'adRandom';
+    const usedAdCells = rows.reduce(
+      (total, row, ri) =>
+        total +
+        row.filter(
+          (t, bi) =>
+            !(ri === rIdx && bi === bIdx) &&
+            (t.kind === 'ad' || t.kind === 'adRandom')
+        ).length,
+      0
+    );
+    if (cellKind === 'adRandom' && !ads.length) {
+      toast('Cadastre uma divulgação antes de criar uma posição aleatória.', 'error');
+      return;
+    }
+    if (
+      (cellKind === 'ad' || cellKind === 'adRandom') &&
+      !currentIsAd &&
+      usedAdCells >= ads.length
+    ) {
+      toast(
+        `Você tem ${ads.length} divulgação(ões) cadastrada(s). Remova uma posição de divulgação ou cadastre outra antes de adicionar mais.`,
+        'error'
+      );
+      return;
+    }
     if (cellKind === 'chat') {
       const id = Number(cellChatId);
       if (!Number.isSafeInteger(id) || id === 0) {
@@ -450,6 +451,25 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               )
         )
       );
+    } else if (cellKind === 'adRandom') {
+      setRows((prev) =>
+        prev.map((row, ri) =>
+          ri !== rIdx
+            ? row
+            : row.map((t, bi) =>
+                bi !== bIdx
+                  ? t
+                  : {
+                      ...t,
+                      kind: 'adRandom',
+                      chatId: undefined,
+                      adId: undefined,
+                      adKey: undefined,
+                      style: appliedStyle,
+                    }
+              )
+        )
+      );
     } else {
       setRows((prev) =>
         prev.map((row, ri) =>
@@ -481,8 +501,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       return false;
     }
 
-    const hasLayoutRows = rows.some((row) => row.length > 0);
-    if (layoutEnabled && !hasLayoutRows) {
+    if (!rows.some((row) => row.length > 0)) {
       toast('Adicione ao menos uma linha ao layout personalizado.', 'error');
       return false;
     }
@@ -499,14 +518,20 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         return false;
       }
     }
+    if (layoutAdCells > ads.length) {
+      toast(
+        `Você tem ${ads.length} divulgação(ões) cadastrada(s) e ${layoutAdCells} posição(ões) de divulgação no layout. Remova ${layoutAdCells - ads.length} posição(ões) ou cadastre mais divulgações.`,
+        'error'
+      );
+      return false;
+    }
 
     const upsert = [];
     const remove = [...removedAdIds];
 
-    // Auto assign unique row/col starting at [16, 0] for partnerships. Rows 16+
-    // stay outside the channel pattern grid, so partnership order is preserved
-    // when the list pattern repeats or paginates. Partnerships have their own
-    // 100-item limit and do not consume the list's C/G positions.
+    // Row/col are only a stable storage slot for the ad editor. The custom
+    // layout decides where each fixed/random ad actually appears, so ads do not
+    // consume the list's C/G positions.
     for (let i = 0; i < ads.length; i++) {
       const ad = ads[i];
       upsert.push({
@@ -529,7 +554,6 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       haptic('heavy');
 
       let adKeyToId = new Map();
-      let nextListAdsConfig = listAdsConfig;
       if (upsert.length || remove.length) {
         const result = await callEndpoint('saveAds', {
           upsert,
@@ -559,23 +583,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               slot_col: savedAd.slot_col,
             };
           });
-          const resolveAdId = (value) =>
-            Number.isSafeInteger(value) && adKeyToId.has(value)
-              ? adKeyToId.get(value)
-              : value;
-          nextListAdsConfig = {
-            ...listAdsConfig,
-            fixedAdId: resolveAdId(listAdsConfig.fixedAdId),
-            randomPool: (listAdsConfig.randomPool || []).map(resolveAdId),
-            slots: Object.fromEntries(
-              Object.entries(listAdsConfig.slots || {}).map(([key, slot]) => [
-                key,
-                { ...slot, adId: resolveAdId(slot?.adId) },
-              ])
-            ),
-          };
           setAds(nextAds);
-          setListAdsConfig(nextListAdsConfig);
           setRows((prev) =>
             prev.map((row) =>
               row.map((token) =>
@@ -607,6 +615,9 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
               }
               return { kind: 'ad', adId, ...styleFields };
             }
+            if (token.kind === 'adRandom') {
+              return { kind: 'adRandom', ...styleFields };
+            }
             return { kind: 'auto', ...styleFields };
           })
         );
@@ -618,11 +629,11 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         groupCategories,
         rowPattern: currentPattern,
         columns: Math.max(1, ...currentPattern),
-        listType,
-        listAdsConfig: nextListAdsConfig,
+        listType: 'mixed',
         buttonLayout: {
-          enabled: layoutEnabled,
+          enabled: true,
           fill: layoutFill,
+          rotate: layoutRotate,
           rows: layoutRows,
         },
       };
@@ -681,14 +692,8 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
   }));
 
   const baseItems = (approvedChats.length ? approvedChats : fallbackChats).slice();
-  const channelChats = baseItems.filter((c) => c.type === 'channel');
-  const groupChats = baseItems.filter((c) => c.type === 'group' || c.type === 'supergroup');
-
-  const activeItems = listType === 'simple'
-    ? (previewSimpleFilter === 'group' ? groupChats : channelChats)
-    : baseItems;
-
-  const previewTargetType = listType === 'simple' ? previewSimpleFilter : '';
+  const activeItems = baseItems;
+  const previewTargetType = '';
 
   const draftLayoutRows = rows
     .filter((row) => row.length > 0)
@@ -705,6 +710,9 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         if (token.kind === 'ad' && Number.isSafeInteger(token.adKey)) {
           return { kind: 'ad', adKey: token.adKey, ...styleFields };
         }
+        if (token.kind === 'adRandom') {
+          return { kind: 'adRandom', ...styleFields };
+        }
         return { kind: 'auto', ...styleFields };
       })
     );
@@ -716,11 +724,11 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     groupCategories,
     rowPattern: currentPattern,
     columns: Math.max(1, ...currentPattern),
-    listType,
-    listAdsConfig,
+    listType: 'mixed',
     buttonLayout: {
-      enabled: layoutEnabled,
+      enabled: true,
       fill: layoutFill,
+      rotate: layoutRotate,
       rows: draftLayoutRows,
     },
   };
@@ -732,6 +740,8 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     seed: 0,
     botUsername: data?.bot?.username || '',
     targetType: previewTargetType,
+    roundIndex: 0,
+    destinationId: activeItems[0]?.id || 0,
   });
   const currentPreviewPage = clampPageIndex(previewPage, previewPages.length);
   const currentPageRows = previewPages[currentPreviewPage]?.rows || [];
@@ -742,7 +752,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
 
   React.useEffect(() => {
     setPreviewPage(0);
-  }, [layoutEnabled, layoutFill, listType, order, groupCategories, rows]);
+  }, [layoutFill, layoutRotate, order, groupCategories, rows]);
 
   React.useEffect(() => {
     setPreviewPage((page) => clampPageIndex(page, previewPages.length));
@@ -801,51 +811,32 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
       {subView === 'organize' && (
         <div className="space-y-4 animate-in fade-in duration-200">
           {/* Custom button layout */}
-          <Card
-            className={`border-white/10 bg-card transition ${
-              layoutEnabled ? 'border-primary/40 bg-primary/5' : ''
-            }`}
-          >
+          <Card className="border-primary/40 bg-primary/5 transition">
             <CardHeader className="p-4 pb-2">
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
                   <Layers className="h-4 w-4 text-primary" />
                   Layout Personalizado da Lista
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] ${
-                      layoutEnabled
-                        ? 'border-primary/40 text-primary'
-                        : 'border-white/10 text-muted-foreground'
-                    }`}
-                  >
-                    {layoutEnabled ? 'Ativo' : 'Desativado'}
+                  <Badge variant="outline" className="text-[10px] border-primary/40 text-primary">
+                    Ativo
                   </Badge>
                 </CardTitle>
-                <Switch
-                  id="button-layout-toggle"
-                  checked={layoutEnabled}
-                  onChange={(checked) => {
-                    haptic('selection');
-                    setLayoutEnabled(checked);
-                  }}
-                />
               </div>
               <CardDescription className="text-xs">
-                Use o desenho abaixo como lista final. Fixe canais, grupos e divulgações em posições
-                exatas; os botões marcados como automáticos são preenchidos na hora do envio.
+                O desenho abaixo é a lista final. Fixe canais, grupos e divulgações em posições
+                exatas; os botões automáticos são preenchidos na hora do envio. O excedente de
+                canais/grupos fica fora desta mensagem.
               </CardDescription>
             </CardHeader>
 
-            {layoutEnabled && (
-              <CardContent className="p-4 pt-1 space-y-3 animate-in fade-in duration-200">
+            <CardContent className="p-4 pt-1 space-y-3 animate-in fade-in duration-200">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground/90">
                     Preencher botões automáticos com
                   </label>
                   <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-black/20 border border-white/10">
                     {[
-                      { id: 'random', label: 'Aleatório', icon: Shuffle },
+                      { id: 'random', label: 'Mistos', icon: Shuffle },
                       { id: 'channel', label: 'Canais', icon: Megaphone },
                       { id: 'group', label: 'Grupos', icon: Users },
                     ].map((option) => {
@@ -873,16 +864,55 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   </div>
                   <p className="text-[11px] leading-relaxed text-muted-foreground">
                     {layoutFill === 'random'
-                      ? 'O bot mistura canais e grupos aprovados e sorteia a ordem em cada envio.'
+                      ? 'Canais e grupos aprovados disputam os botões automáticos, sem repetir o mesmo C/G nesta lista.'
                       : layoutFill === 'channel'
                       ? 'Apenas canais aprovados ocupam os botões automáticos. C/G fixos continuam nas posições definidas.'
                       : 'Apenas grupos aprovados ocupam os botões automáticos. C/G fixos continuam nas posições definidas.'}
                   </p>
                 </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Shuffle className="h-3.5 w-3.5 text-primary" />
+                      Lista rotativa
+                    </span>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      Os botões automáticos e as divulgações aleatórias variam por canal/grupo na
+                      mesma rodada e avançam a cada rodada. Os fixos não mudam.
+                    </p>
+                  </div>
+                  <Switch
+                    id="button-layout-rotate"
+                    checked={layoutRotate}
+                    onChange={(checked) => {
+                      haptic('selection');
+                      setLayoutRotate(checked);
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                  <span>
+                    C/G nesta lista: <strong className="text-foreground">{layoutChatCells}</strong>
+                  </span>
+                  <span>
+                    Divulgações: <strong className="text-foreground">{layoutAdCells}</strong> de{' '}
+                    <strong className="text-foreground">{ads.length}</strong> cadastrada(s)
+                  </span>
+                </div>
+
                 <p className="text-[11px] leading-relaxed rounded-xl border border-amber-500/20 bg-amber-500/10 p-2.5 text-amber-200/90">
-                  Os botões fixos aparecem uma vez por lista. O restante dos participantes é
-                  distribuído nos botões automáticos, repetindo o desenho quando necessário.
+                  A lista terá no máximo {layoutChatCells} botões de canal/grupo. Quem não couber
+                  fica fora desta mensagem e não gera uma segunda parte. O rodapé não conta nesse
+                  limite.
                 </p>
+                {layoutAdCells > ads.length && (
+                  <p className="text-[11px] leading-relaxed rounded-xl border border-rose-500/25 bg-rose-500/10 p-2.5 text-rose-200">
+                    Há {layoutAdCells} posições de divulgação para {ads.length} divulgação(ões)
+                    cadastrada(s). Remova posições ou cadastre mais divulgações para salvar.
+                  </p>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -894,7 +924,6 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   {testing ? 'Enviando teste...' : 'Salvar e testar no Telegram'}
                 </Button>
               </CardContent>
-            )}
           </Card>
 
           {/* Quick Presets & Add Row Action */}
@@ -1007,8 +1036,11 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                         ? (data?.chats || []).find((c) => Number(c.id) === Number(token.chatId))
                         : null;
                     const isAuto = !token.kind || token.kind === 'auto';
+                    const isAdRandom = token.kind === 'adRandom';
                     const label = isAuto
                       ? `Automático ${bIdx + 1}`
+                      : isAdRandom
+                      ? 'Divulgação aleatória'
                       : ad
                       ? ad.title || 'Divulgação'
                       : chat
@@ -1024,7 +1056,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                         className={`group relative flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer select-none ${
                           isSelected
                             ? 'border-primary bg-primary/20 text-white ring-2 ring-primary/40'
-                            : ad
+                            : ad || isAdRandom
                             ? 'border-amber-500/40 bg-amber-500/10 text-amber-200 hover:border-amber-400'
                             : chat
                             ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400'
@@ -1034,6 +1066,8 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                         <span className="truncate flex items-center gap-1.5">
                           {ad ? (
                             <Megaphone className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                          ) : isAdRandom ? (
+                            <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                           ) : chat ? (
                             chat.type === 'channel' ? (
                               <Megaphone className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
@@ -1056,19 +1090,17 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                         </span>
 
                         <div className="flex items-center gap-1 shrink-0 ml-1">
-                          {layoutEnabled && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openCellEditor(rIdx, bIdx);
-                              }}
-                              className="opacity-60 group-hover:opacity-100 hover:text-primary p-0.5 rounded transition"
-                              title="Configurar este botão"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCellEditor(rIdx, bIdx);
+                            }}
+                            className="opacity-60 group-hover:opacity-100 hover:text-primary p-0.5 rounded transition"
+                            title="Configurar este botão"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
                           {row.length > 1 && (
                             <button
                               type="button"
@@ -1149,7 +1181,6 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   >
                     <option value="alphabetical">Alfabética (A-Z)</option>
                     <option value="manual">Posição manual cadastrada</option>
-                    <option value="rotate">Alternar a cada rodada</option>
                   </select>
                 </div>
 
@@ -1166,134 +1197,6 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
             </CardContent>
           </Card>
 
-          {/* CARD: TIPO DE ENTREGA DA LISTA */}
-          <Card className="border-white/10 bg-card">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Layers className="h-4 w-4 text-primary" />
-                Tipo de Entrega da Lista
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Defina como a lista final será distribuída aos canais e grupos participantes.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 pt-1 space-y-2.5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div
-                  onClick={() => {
-                    haptic('selection');
-                    setListType('mixed');
-                  }}
-                  className={`p-3.5 rounded-xl border text-xs cursor-pointer transition-all space-y-1 ${
-                    listType === 'mixed'
-                      ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40'
-                      : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10 hover:border-white/20'
-                  }`}
-                >
-                  <div className="flex items-center justify-between font-semibold">
-                    <span className="flex items-center gap-1.5 text-foreground">
-                      <span className="text-primary font-bold">🌐 Lista Mista</span>
-                      <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">
-                        Padrão
-                      </Badge>
-                    </span>
-                    {listType === 'mixed' && <Check className="h-4 w-4 text-primary" />}
-                  </div>
-                  <p className="text-[11px] leading-relaxed">
-                    Canais e grupos são reunidos juntos na mesma lista final. Entregue igualmente para ambos.
-                  </p>
-                </div>
-
-                <div
-                  onClick={() => {
-                    haptic('selection');
-                    setListType('simple');
-                  }}
-                  className={`p-3.5 rounded-xl border text-xs cursor-pointer transition-all space-y-1 ${
-                    listType === 'simple'
-                      ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/40'
-                      : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10 hover:border-white/20'
-                  }`}
-                >
-                  <div className="flex items-center justify-between font-semibold">
-                    <span className="flex items-center gap-1.5 text-foreground">
-                      <span className="text-emerald-400 font-bold">📑 Lista Simples</span>
-                      <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-400">
-                        Separada
-                      </Badge>
-                    </span>
-                    {listType === 'simple' && <Check className="h-4 w-4 text-emerald-400" />}
-                  </div>
-                  <p className="text-[11px] leading-relaxed">
-                    Lista dividida: canais recebem exclusivamente uma lista de canais, e grupos recebem uma lista só de grupos.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* CARD: DIVULGAÇÕES DA LISTA FINAL */}
-          <Card className="border-white/10 bg-card">
-            <CardHeader className="p-4 pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Megaphone className="h-4 w-4 text-amber-400" />
-                  Divulgações na Lista Final
-                </CardTitle>
-                <Badge
-                  variant="outline"
-                  className={`text-xs ${
-                    listAdsConfig.enabled
-                      ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
-                      : 'border-white/10 text-muted-foreground'
-                  }`}
-                >
-                  {listAdsConfig.enabled ? 'Ativadas' : 'Desativadas'}
-                </Badge>
-              </div>
-              <CardDescription className="text-xs">
-                Posicione até 3 slots de divulgação no Início, Meio e Fim da lista entregue.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 pt-1 space-y-3">
-              {layoutEnabled && (
-                <p className="text-[11px] leading-relaxed rounded-xl border border-amber-500/25 bg-amber-500/10 p-2.5 text-amber-200/90">
-                  O layout personalizado está ativo. As divulgações entram na lista apenas quando
-                  fixadas em um botão do desenho (use o lápis no botão). Os slots abaixo ficam
-                  ignorados enquanto o layout estiver ativo.
-                </p>
-              )}
-              <div className="flex flex-wrap items-center justify-between gap-2.5 p-3 rounded-xl bg-white/5 border border-white/10 text-xs">
-                <div className="space-y-0.5">
-                  <div className="font-semibold text-foreground flex items-center gap-2">
-                    <span>Slots estratégicos:</span>
-                    <span className="text-amber-300">
-                      {[
-                        listAdsConfig.slots?.start?.enabled && 'Início (Topo)',
-                        listAdsConfig.slots?.middle?.enabled && 'Meio (Centro)',
-                        listAdsConfig.slots?.end?.enabled && 'Fim (Rodapé)',
-                      ]
-                        .filter(Boolean)
-                        .join(', ') || 'Nenhum ativo'}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    Modo: {listAdsConfig.mode === 'random' ? 'Aleatório (Sorteio)' : 'Fixo'} • Distribuição: {listAdsConfig.sameAdAcrossSlots ? 'Mesma em todos' : 'Diferente por slot'}
-                  </div>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAdsModalOpen(true)}
-                  className="border-amber-500/30 text-amber-300 hover:bg-amber-500/10 text-xs h-8 font-semibold"
-                >
-                  <SlidersHorizontal className="h-3.5 w-3.5 mr-1" />
-                  Configurar Divulgações
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       )}
 
@@ -1308,41 +1211,10 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   Dados fictícios
                 </Badge>
               )}
-              {listType === 'simple' && (
-                <div className="flex rounded-lg bg-black/20 p-1 border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      haptic('selection');
-                      setPreviewSimpleFilter('channel');
-                      setPreviewPage(0);
-                    }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                      previewSimpleFilter === 'channel'
-                        ? 'bg-sky-500 text-white shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <span>📢 Canais</span>
-                    <span className="text-[10px] opacity-80">({channelChats.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      haptic('selection');
-                      setPreviewSimpleFilter('group');
-                      setPreviewPage(0);
-                    }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                      previewSimpleFilter === 'group'
-                        ? 'bg-emerald-500 text-white shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <span>💬 Grupos</span>
-                    <span className="text-[10px] opacity-80">({groupChats.length})</span>
-                  </button>
-                </div>
+              {layoutRotate && (
+                <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">
+                  Lista rotativa: variação de exemplo
+                </Badge>
               )}
 
               <div className="flex items-center gap-1.5">
@@ -1461,302 +1333,15 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
             Divulgações Parceiras na Lista Final
           </DialogTitle>
           <DialogDescription>
-            Configure até 3 slots de divulgação (Início, Meio e Fim) com opções fixas ou aleatórias.
+            Cadastre os parceiros e escolha as posições no Layout Personalizado.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-0 -mr-1 overscroll-contain">
-          {/* ATIVAÇÃO GERAL */}
-          <div className="flex items-center justify-between p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
-            <div className="space-y-0.5">
-              <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                Ativar Divulgações Estratégicas
-              </span>
-              <p className="text-[11px] text-amber-200/80">
-                Exibe botões patrocinados em linhas exclusivas no Início, Meio e Fim da lista.
-              </p>
-            </div>
-            <Switch
-              id="strategic-ads-toggle"
-              checked={listAdsConfig.enabled}
-              onChange={(checked) => {
-                setListAdsConfig((prev) => ({ ...prev, enabled: checked }));
-              }}
-            />
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-200/90">
+            Use o lápis de um botão do layout para fixar uma divulgação ou marcar a posição como
+            aleatória. Cada divulgação aparece no máximo uma vez por lista.
           </div>
-
-          {/* SLOTS, MODO E DISTRIBUIÇÃO QUANDO ATIVADO */}
-          {listAdsConfig.enabled && (
-            <div className="space-y-3.5 p-3.5 rounded-2xl bg-white/5 border border-white/10 animate-in fade-in duration-200">
-              {/* POSIÇÕES / SLOTS */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground/90">
-                  Posições na Lista Final (Até 3 slots):
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'start', label: 'Início', sub: 'Topo da lista' },
-                    { id: 'middle', label: 'Meio', sub: 'Centro da lista' },
-                    { id: 'end', label: 'Fim', sub: 'Rodapé da lista' },
-                  ].map((slot) => {
-                    const isActive = Boolean(listAdsConfig.slots?.[slot.id]?.enabled);
-                    return (
-                      <div
-                        key={slot.id}
-                        onClick={() => {
-                          haptic('selection');
-                          setListAdsConfig((prev) => ({
-                            ...prev,
-                            slots: {
-                              ...prev.slots,
-                              [slot.id]: {
-                                ...prev.slots?.[slot.id],
-                                enabled: !isActive,
-                              },
-                            },
-                          }));
-                        }}
-                        className={`p-2.5 rounded-xl border text-center cursor-pointer transition select-none ${
-                          isActive
-                            ? 'border-amber-500/50 bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40'
-                            : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
-                        }`}
-                      >
-                        <div className="text-xs font-bold">{slot.label}</div>
-                        <div className="text-[10px] opacity-75">{slot.sub}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* MODO & DISTRIBUIÇÃO */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                {/* Modo */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground/90">Modo de Exibição</label>
-                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/20 border border-white/10">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        haptic('selection');
-                        setListAdsConfig((prev) => ({ ...prev, mode: 'fixed' }));
-                      }}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1 ${
-                        listAdsConfig.mode === 'fixed'
-                          ? 'bg-primary text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <Pin className="h-3 w-3" /> Fixo
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        haptic('selection');
-                        setListAdsConfig((prev) => ({ ...prev, mode: 'random' }));
-                      }}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1 ${
-                        listAdsConfig.mode === 'random'
-                          ? 'bg-primary text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <Shuffle className="h-3 w-3" /> Aleatório
-                    </button>
-                  </div>
-                </div>
-
-                {/* Distribuição */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground/90">Distribuição nos Slots</label>
-                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/20 border border-white/10">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        haptic('selection');
-                        setListAdsConfig((prev) => ({ ...prev, sameAdAcrossSlots: true }));
-                      }}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1 ${
-                        listAdsConfig.sameAdAcrossSlots
-                          ? 'bg-primary text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <RotateCcw className="h-3 w-3" /> Mesma
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        haptic('selection');
-                        setListAdsConfig((prev) => ({ ...prev, sameAdAcrossSlots: false }));
-                      }}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1 ${
-                        !listAdsConfig.sameAdAcrossSlots
-                          ? 'bg-primary text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <Layers className="h-3 w-3" /> Diferente
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* SELEÇÃO DO PARCEIRO FIXO OU POOL ALEATÓRIO */}
-              {listAdsConfig.mode === 'fixed' && listAdsConfig.sameAdAcrossSlots && (
-                <div className="space-y-1 pt-1">
-                  <label className="text-xs font-semibold text-foreground/90">
-                    Parceiro exibido em todos os slots:
-                  </label>
-                  <select
-                    value={listAdsConfig.fixedAdId || ''}
-                    onChange={(e) => {
-                      const val = e.target.value ? Number(e.target.value) : null;
-                      setListAdsConfig((prev) => ({ ...prev, fixedAdId: val }));
-                    }}
-                    className="w-full h-9 rounded-lg border border-white/10 bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <option value="">(Primeiro parceiro da lista)</option>
-                    {ads.map((a) => (
-                      <option key={a.key} value={a.id || a.key}>
-                        {a.title || 'Sem título'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {listAdsConfig.mode === 'fixed' && !listAdsConfig.sameAdAcrossSlots && (
-                <div className="space-y-2 pt-1">
-                  {listAdsConfig.slots?.start?.enabled && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-foreground/90">
-                        Parceiro para o Início (Topo):
-                      </label>
-                      <select
-                        value={listAdsConfig.slots?.start?.adId || ''}
-                        onChange={(e) => {
-                          const val = e.target.value ? Number(e.target.value) : null;
-                          setListAdsConfig((prev) => ({
-                            ...prev,
-                            slots: { ...prev.slots, start: { ...prev.slots?.start, adId: val } },
-                          }));
-                        }}
-                        className="w-full h-9 rounded-lg border border-white/10 bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="">(Automático / Primeiro disponível)</option>
-                        {ads.map((a) => (
-                          <option key={a.key} value={a.id || a.key}>
-                            {a.title || 'Sem título'}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {listAdsConfig.slots?.middle?.enabled && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-foreground/90">
-                        Parceiro para o Meio (Centro):
-                      </label>
-                      <select
-                        value={listAdsConfig.slots?.middle?.adId || ''}
-                        onChange={(e) => {
-                          const val = e.target.value ? Number(e.target.value) : null;
-                          setListAdsConfig((prev) => ({
-                            ...prev,
-                            slots: { ...prev.slots, middle: { ...prev.slots?.middle, adId: val } },
-                          }));
-                        }}
-                        className="w-full h-9 rounded-lg border border-white/10 bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="">(Automático / Segundo disponível)</option>
-                        {ads.map((a) => (
-                          <option key={a.key} value={a.id || a.key}>
-                            {a.title || 'Sem título'}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {listAdsConfig.slots?.end?.enabled && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-foreground/90">
-                        Parceiro para o Fim (Rodapé):
-                      </label>
-                      <select
-                        value={listAdsConfig.slots?.end?.adId || ''}
-                        onChange={(e) => {
-                          const val = e.target.value ? Number(e.target.value) : null;
-                          setListAdsConfig((prev) => ({
-                            ...prev,
-                            slots: { ...prev.slots, end: { ...prev.slots?.end, adId: val } },
-                          }));
-                        }}
-                        className="w-full h-9 rounded-lg border border-white/10 bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="">(Automático / Terceiro disponível)</option>
-                        {ads.map((a) => (
-                          <option key={a.key} value={a.id || a.key}>
-                            {a.title || 'Sem título'}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {listAdsConfig.mode === 'random' && (
-                <div className="space-y-1.5 pt-1">
-                  <label className="text-xs font-semibold text-foreground/90">
-                    Parceiros no Sorteio Aleatório:
-                  </label>
-                  <div className="space-y-1 max-h-36 overflow-y-auto p-2 rounded-xl bg-black/20 border border-white/10">
-                    {ads.length === 0 ? (
-                      <p className="text-[11px] text-muted-foreground p-1">Nenhum parceiro cadastrado.</p>
-                    ) : (
-                      ads.map((a) => {
-                        const idVal = a.id || a.key;
-                        const isChecked = listAdsConfig.randomPool?.includes(idVal);
-                        return (
-                          <div
-                            key={a.key}
-                            className="flex items-center p-1.5 rounded-lg hover:bg-white/5 transition"
-                          >
-                            <Checkbox
-                              id={`pool-${a.key}`}
-                              checked={isChecked}
-                              onCheckedChange={(checked) => {
-                                setListAdsConfig((prev) => {
-                                  const current = prev.randomPool || [];
-                                  const updated = checked
-                                    ? [...new Set([...current, idVal])]
-                                    : current.filter((x) => x !== idVal);
-                                  return { ...prev, randomPool: updated };
-                                });
-                              }}
-                              className="w-full"
-                            >
-                              <span className="truncate">{a.title || 'Sem título'}</span>
-                            </Checkbox>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">
-                    {listAdsConfig.randomPool?.length
-                      ? `${listAdsConfig.randomPool.length} parceiro(s) selecionado(s) para o sorteio.`
-                      : 'Nenhum parceiro marcado: todos os cadastrados entrarão no sorteio.'}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* LISTA DE PARCEIROS CADASTRADOS (RETRACTABLE LIST VIEW) */}
           <div className="space-y-2.5 pt-1">
@@ -1971,11 +1556,12 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
         </DialogHeader>
 
         <div className="space-y-3 py-1">
-          <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-black/20 border border-white/10">
+          <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/20 border border-white/10">
             {[
               { id: 'auto', label: 'Automático', icon: Shuffle },
               { id: 'chat', label: 'C/G fixo', icon: Tag },
-              { id: 'ad', label: 'Divulgação', icon: Megaphone },
+              { id: 'ad', label: 'Divulgação fixa', icon: Megaphone },
+              { id: 'adRandom', label: 'Div. aleatória', icon: Sparkles },
             ].map((option) => {
               const Icon = option.icon;
               const active = cellKind === option.id;
@@ -2073,10 +1659,24 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
             </div>
           )}
 
+          {cellKind === 'adRandom' && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200/90 leading-relaxed space-y-1">
+              <p>
+                Esta posição recebe uma divulgação ainda não usada nesta lista. Quando a lista
+                rotativa está ativa, o parceiro escolhido varia por canal/grupo e a cada rodada.
+              </p>
+              <p className="text-[11px] text-amber-200/70">
+                {ads.length} divulgação(ões) cadastrada(s) • {layoutAdCells} posição(ões) de
+                divulgação no layout.
+              </p>
+            </div>
+          )}
+
           {cellKind === 'auto' && (
             <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-muted-foreground leading-relaxed">
               Esta posição será preenchida automaticamente com um canal/grupo aprovado, seguindo a
-              opção escolhida no layout (aleatório, canais ou grupos).
+              opção escolhida no layout (mistos, canais ou grupos). O mesmo C/G não se repete nesta
+              lista.
             </div>
           )}
 
@@ -2090,7 +1690,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
             <p className="text-[11px] text-muted-foreground">
               {cellKind === 'chat'
                 ? 'Se o C/G tiver uma cor individual definida na aba Canais, ela continua tendo prioridade.'
-                : cellKind === 'ad'
+                : cellKind === 'ad' || cellKind === 'adRandom'
                 ? 'Esta cor prevalece sobre a cor cadastrada na divulgação.'
                 : 'Aplicada ao C/G sorteado. Se ele tiver cor individual na aba Canais, ela prevalece.'}
             </p>

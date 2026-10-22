@@ -16,6 +16,21 @@ export function isValidTelegramLink(value) {
   );
 }
 
+const LONE_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+// Mirrors tgcloud/lib/domain.js truncateButtonText. Telegram rejects inline
+// keyboard buttons whose text contains a lone surrogate, and slice() can split
+// an emoji in half.
+export function truncateButtonText(value, max = 60) {
+  const text = String(value ?? '').replace(LONE_SURROGATE, '');
+  if (text.length <= max) return text;
+  let end = max;
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return text.slice(0, end);
+}
+
 const TELEGRAM_ALLOWED_TAGS = new Set([
   'B', 'STRONG', 'I', 'EM', 'U', 'INS', 'S', 'STRIKE', 'DEL',
   'A', 'CODE', 'PRE', 'BLOCKQUOTE', 'SPAN', 'TG-SPOILER', 'TG-EMOJI', 'BR'

@@ -1,5 +1,5 @@
 import { api, db } from 'sdk';
-import { APP_URL, validLink, OWNER, OWNERS, isOwner, normalizeMaintenance, validateSettings } from '../lib/domain.js';
+import { APP_URL, validLink, OWNER, OWNERS, isOwner, normalizeMaintenance, validateSettings, truncateButtonText } from '../lib/domain.js';
 import { getChat, isAdmin, state, putState, isBanned, config } from '../lib/store.js';
 import { register, menu, chatAdmin } from '../lib/registration.js';
 import { screen, privateScreen, escHtml } from '../lib/navigation.js';
@@ -625,7 +625,7 @@ async function handleMessage(m){
    await screen(user,`private_menu:${user}`,`🔍 <a href="${botLink}"><b><i>Explorar Comunidades</i></b></a>\n\n<blockquote><b><i>Nenhuma comunidade encontrada para “${escHtml(text)}”.</i></b></blockquote>\n\n<b><i>Tente pesquisar por outro nicho ou termo.</i></b>`,[[{text:'🔍 Pesquisar novamente',callback_data:'nav:search'}],[{text:'🏠 Início',callback_data:'nav:home'}]]);
    return;
   }
-  const rows=results.map(c=>[{text:'📢 '+(c.display||c.title).slice(0,45),url:c.url}]);
+  const rows=results.map(c=>[{text:'📢 '+truncateButtonText(c.display||c.title,45),url:c.url}]);
   rows.push([{text:'🔍 Nova pesquisa',callback_data:'nav:search'},{text:'🏠 Início',callback_data:'nav:home'}]);
   await screen(user,`private_menu:${user}`,`🔍 <a href="${botLink}"><b><i>Resultados da Busca</i></b></a>\n\n<blockquote><b><i>Encontramos ${results.length} comunidade(s) para “${escHtml(text)}”:</i></b></blockquote>\n\n<b><i>Toque em um dos botões abaixo para acessar:</i></b>`,rows);
   return;

@@ -1,6 +1,6 @@
 import { api, db } from 'sdk';
 import { config } from './store.js';
-import { escHtml } from './domain.js';
+import { escHtml, truncateButtonText } from './domain.js';
 import { ensureLogTopic } from './log_topics.js';
 
 export async function initTicketsTable() {
@@ -193,7 +193,7 @@ export async function startTicketService(code, adminUser) {
 
   const logChat = ticket.log_chat_id;
   const adminName = [adminUser.first_name, adminUser.last_name].filter(Boolean).join(' ') || (adminUser.username ? `@${adminUser.username}` : `Admin ${adminUser.id}`);
-  const topicTitle = `🎫 Ticket #${code} - ${ticket.user_name || ticket.user_id}`.slice(0, 128);
+  const topicTitle = truncateButtonText(`🎫 Ticket #${code} - ${ticket.user_name || ticket.user_id}`, 128);
 
   let newThreadId = null;
   try {
@@ -484,7 +484,7 @@ export async function reopenTicket(code, reopenerUser) {
 
   // Caso o tópico não exista, cria um novo tópico
   if (!activeThreadId) {
-    const topicTitle = `🎫 Ticket #${code} - ${ticket.user_name || ticket.user_id}`.slice(0, 128);
+    const topicTitle = truncateButtonText(`🎫 Ticket #${code} - ${ticket.user_name || ticket.user_id}`, 128);
     try {
       const topic = await api.createForumTopic({
         chat_id: logChat,

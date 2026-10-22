@@ -27,16 +27,17 @@ const chats = [
 
 const ads = [{ id: 10, title: 'Parceiro', url: 'https://t.me/parceiro', style: 'primary' }];
 
-test('prévia espelha o envio real com layout, cores, categorias, anúncios e paginação', () => {
+test('prévia espelha o envio real com layout, cores, categorias e anúncios em uma mensagem', () => {
   const settings = {
     ...DEFAULTS,
     text: 'Olá, comunidade!',
-    order: 'rotate',
+    order: 'alphabetical',
     groupCategories: true,
     footerButtons: true,
     buttonLayout: {
       enabled: true,
       fill: 'random',
+      rotate: true,
       rows: [
         [
           { kind: 'chat', chatId: 2, style: 'danger' },
@@ -48,11 +49,22 @@ test('prévia espelha o envio real com layout, cores, categorias, anúncios e pa
     },
   };
 
-  const expected = normalize(makePages(chats, settings, 5, ads, 'TestBot'));
+  const expected = normalize(
+    makePages(chats, settings, 5, ads, 'TestBot', '', { roundIndex: 2, destinationId: 3 })
+  );
   const actual = normalize(
-    buildPreviewPages({ chats, settings, ads, seed: 5, botUsername: 'TestBot' })
+    buildPreviewPages({
+      chats,
+      settings,
+      ads,
+      seed: 5,
+      botUsername: 'TestBot',
+      roundIndex: 2,
+      destinationId: 3,
+    })
   );
 
+  assert.equal(actual.length, 1);
   assert.deepEqual(actual, expected);
 });
 
@@ -85,28 +97,43 @@ test('prévia fixa divulgação nova ainda sem id usando adKey', () => {
   assert.deepEqual(actual, expected);
 });
 
-test('prévia espelha anúncios antigos por posição e rodapé desativado', () => {
-  const legacyAd = {
-    title: 'Antigo parceiro',
-    url: 'https://t.me/antigoparceiro',
-    style: 'danger',
-    slot_row: 0,
-    slot_col: 1,
-  };
+test('prévia espelha divulgação aleatória e lista rotativa sem rodapé', () => {
+  const rotationAds = [
+    { id: 10, title: 'Parceiro Fixo', url: 'https://t.me/parceiro', style: 'primary' },
+    { id: 11, title: 'Parceiro Beta', url: 'https://t.me/parceirobeta', style: 'success' },
+    { id: 12, title: 'Parceiro Gama', url: 'https://t.me/parceirogama', style: 'danger' },
+  ];
   const settings = {
     ...DEFAULTS,
-    text: 'Lista antiga',
+    text: 'Lista rotativa',
     order: 'alphabetical',
     groupCategories: false,
-    rowPattern: [1, 2],
     footerButtons: false,
-    listAdsConfig: { ...DEFAULTS.listAdsConfig, enabled: false },
+    buttonLayout: {
+      enabled: true,
+      fill: 'random',
+      rotate: true,
+      rows: [
+        [{ kind: 'ad', adId: 10 }, { kind: 'adRandom' }],
+        [{ kind: 'adRandom' }, { kind: 'auto' }],
+      ],
+    },
   };
 
-  const expected = normalize(makePages(chats, settings, 0, [legacyAd]));
+  const expected = normalize(
+    makePages(chats, settings, 9, rotationAds, '', '', { roundIndex: 4, destinationId: 6 })
+  );
   const actual = normalize(
-    buildPreviewPages({ chats, settings, ads: [legacyAd], seed: 0 })
+    buildPreviewPages({
+      chats,
+      settings,
+      ads: rotationAds,
+      seed: 9,
+      roundIndex: 4,
+      destinationId: 6,
+    })
   );
 
+  assert.equal(actual.length, 1);
   assert.deepEqual(actual, expected);
 });

@@ -6,7 +6,7 @@ test('horários fixos usam UTC−3 e avançam ao próximo dia',()=>{const now=Da
 test('intervalo arbitrário de 90 minutos preserva a duração',()=>assert.equal(nextTime({enabled:true,mode:'interval',minutes:90},1000),5401000));
 test('validação rejeita configurações inválidas',()=>{assert.throws(()=>validateSettings({...DEFAULTS,columns:8}));assert.throws(()=>validateSettings({...DEFAULTS,schedule:{...DEFAULTS.schedule,times:['25:00']}}));assert.throws(()=>validateSettings({...DEFAULTS,admins:[NaN]}));});
 test('IDs principais dos proprietários são preservados',()=>assert.deepEqual(validateSettings({...DEFAULTS,admins:[]}).admins,[7595607953,8474484790]));
-test('somente aprovados aparecem e os botões são divididos em páginas',()=>{const items=Array.from({length:85},(_,i)=>({id:i,title:'Canal '+i,url:'https://t.me/test'+i,status:i===0?'pending':'approved',category:0}));const pages=makePages(items,{...DEFAULTS,footerButtons:false});assert.equal(pages.length,3);assert.equal(pages.flatMap(p=>p.reply_markup.inline_keyboard.flat()).length,84);assert.ok(pages.every(p=>p.reply_markup.inline_keyboard.every(r=>r.length<=2)));});
+test('somente aprovados aparecem e a lista inteira cabe em uma única mensagem',()=>{const items=Array.from({length:85},(_,i)=>({id:i,title:'Canal '+i,url:'https://t.me/test'+i,status:i===0?'pending':'approved',category:0}));const pages=makePages(items,{...DEFAULTS,footerButtons:false});assert.equal(pages.length,1);assert.equal(pages[0].reply_markup.inline_keyboard.flat().length,20);assert.ok(pages[0].reply_markup.inline_keyboard.every(r=>r.length<=2));});
 test('permissão para fixar difere entre canal e grupo',()=>{const m={status:'administrator',can_post_messages:true,can_delete_messages:true,can_pin_messages:true};assert.equal(permissionErrors({type:'channel'},m).length,1);assert.equal(permissionErrors({type:'supergroup'},m).length,0);assert.equal(permissionErrors({type:'channel'},{...m,can_edit_messages:true}).length,0);});
 test('somente links do Telegram são publicados',()=>{assert.equal(validLink('javascript:alert(1)'),false);assert.equal(validLink('https://t.me/+Abc_123'),true);assert.equal(validLink('https://t.me/testchannel'),true);assert.equal(validLink('https://t.me.evil.test/test'),false);});
 
@@ -18,30 +18,33 @@ test('prévia limita a página atual quando a lista diminui',()=>{
  assert.equal(clampPageIndex(9,3),2);
 });
 
-test('padrão 1-2-1 repete em toda a lista e preserva último bloco parcial',()=>{
- const chats=Array.from({length:11},(_,i)=>({id:i,position:i,title:'Canal '+i,url:'https://t.me/canal'+i,status:'approved',category:0}));
- const rows=makePages(chats,{...DEFAULTS,order:'manual',rowPattern:[1,2,1],footerButtons:false})[0].reply_markup.inline_keyboard;
- assert.deepEqual(rows.map(r=>r.length),[1,2,1,1,2,1,1,2]);assert.deepEqual(rows.flat().map(b=>b.text),chats.map(c=>c.title));
+test('layout 1-2-1 respeita o desenho e não repete para completar a lista',()=>{
+ const chats=Array.from({length:11},(_,i)=>({id:i,type:'channel',position:i,title:'Canal '+i,url:'https://t.me/canal'+i,status:'approved',category:0}));
+ const layout={enabled:true,fill:'channel',rows:[[{kind:'auto'}],[{kind:'auto'},{kind:'auto'}],[{kind:'auto'}]]};
+ const rows=makePages(chats,{...DEFAULTS,order:'manual',buttonLayout:layout,footerButtons:false})[0].reply_markup.inline_keyboard;
+ assert.deepEqual(rows.map(r=>r.length),[1,2,1]);
+ assert.deepEqual(rows.flat().map(b=>b.text),['Canal 0','Canal 1','Canal 2','Canal 3']);
 });
-test('divulgação ocupa o slot desenhado em cada repetição sem alterar o fluxo',()=>{
- const chats=Array.from({length:11},(_,i)=>({id:i,position:i,title:'Canal '+i,url:'https://t.me/canal'+i,status:'approved',category:0}));
- const ad={title:'Patrocinador',url:'https://t.me/patrocssinador',style:'primary',slot_row:1,slot_col:1};
- const rows=makePages(chats,{...DEFAULTS,order:'manual',rowPattern:[1,2,1],footerButtons:false},0,[ad])[0].reply_markup.inline_keyboard;
- assert.deepEqual(rows.map(r=>r.length),[1,2,1,1,2,1,1,2,1,1,2]);
- assert.deepEqual(rows.flat().map(b=>b.text),['Canal 0','Canal 1','Patrocinador','Canal 2','Canal 3','Canal 4','Patrocinador','Canal 5','Canal 6','Canal 7','Patrocinador','Canal 8','Canal 9','Canal 10','Patrocinador']);
+test('divulgação fixa ocupa a posição desenhada e não se repete',()=>{
+ const chats=Array.from({length:4},(_,i)=>({id:i,position:i,title:'Canal '+i,url:'https://t.me/canal'+i,status:'approved',category:0}));
+ const ad={id:7,title:'Patrocinador',url:'https://t.me/patrocssinador',style:'primary'};
+ const layout={enabled:true,fill:'random',rows:[[{kind:'auto'},{kind:'ad',adId:7}],[{kind:'auto'},{kind:'auto'}]]};
+ const rows=makePages(chats,{...DEFAULTS,order:'manual',buttonLayout:layout,footerButtons:false},0,[ad])[0].reply_markup.inline_keyboard;
+ assert.deepEqual(rows.flat().map(b=>b.text),['Canal 0','Patrocinador','Canal 1','Canal 2']);
  assert.deepEqual(rows.flat().find(b=>b.text==='Patrocinador'),{text:'Patrocinador',url:'https://t.me/patrocssinador',style:'primary'});
 });
-test('estilo inválido sai sem style e slot fora da largura é ignorado',()=>{
+test('estilo inválido sai sem style e posição fixa inexistente não vira C/G',()=>{
  const chats=[{id:1,position:0,title:'Canal A',url:'https://t.me/canala',status:'approved',category:0}];
- const s={...DEFAULTS,order:'manual',rowPattern:[1],footerButtons:false};
- assert.deepEqual(makePages(chats,s,0,[{title:'Ad',url:'https://t.me/aaaa',slot_row:0,slot_col:0,style:'rosa'}])[0].reply_markup.inline_keyboard,[[{text:'Ad',url:'https://t.me/aaaa'}]]);
- assert.deepEqual(makePages(chats,s,0,[{title:'Ad',url:'https://t.me/aaaa',slot_row:0,slot_col:1}])[0].reply_markup.inline_keyboard,[[{text:'Canal A',url:'https://t.me/canala'}]]);
+ const layout={enabled:true,fill:'random',rows:[[{kind:'ad',adId:99,style:'rosa'},{kind:'auto'}]]};
+ assert.deepEqual(makePages(chats,{...DEFAULTS,order:'manual',buttonLayout:layout,footerButtons:false},0,[])[0].reply_markup.inline_keyboard,[[{text:'Canal A',url:'https://t.me/canala'}]]);
 });
-test('paginação não interrompe uma linha nem reinicia o padrão',()=>{
+test('lista grande é truncada nas posições do layout sem criar segunda mensagem',()=>{
  const chats=Array.from({length:103},(_,i)=>({id:i,position:i,title:'Canal '+i,url:'https://t.me/canal'+i,status:'approved',category:0}));
- const pages=makePages(chats,{...DEFAULTS,order:'manual',rowPattern:[5,2,4],footerButtons:false});const rows=pages.flatMap(p=>p.reply_markup.inline_keyboard);
- assert.ok(pages.every(p=>p.reply_markup.inline_keyboard.length<=20&&p.reply_markup.inline_keyboard.flat().length<=40));
- assert.deepEqual(rows.flat().map(b=>b.text),chats.map(c=>c.title));assert.ok(rows.slice(0,-1).every((r,i)=>r.length===[5,2,4][i%3]));
+ const layout={enabled:true,fill:'random',rows:[[{kind:'auto'},{kind:'auto'},{kind:'auto'},{kind:'auto'},{kind:'auto'}],[{kind:'auto'},{kind:'auto'}],[{kind:'auto'},{kind:'auto'},{kind:'auto'},{kind:'auto'}]]};
+ const pages=makePages(chats,{...DEFAULTS,order:'manual',buttonLayout:layout,footerButtons:false});
+ assert.equal(pages.length,1);
+ assert.equal(pages[0].reply_markup.inline_keyboard.flat().length,11);
+ assert.deepEqual(pages[0].reply_markup.inline_keyboard.map(r=>r.length),[5,2,4]);
 });
 test('limites do padrão e migração das colunas anteriores',()=>{
  assert.deepEqual(validateSettings({...DEFAULTS,columns:2}).rowPattern,[2]);
@@ -50,6 +53,16 @@ test('limites do padrão e migração das colunas anteriores',()=>{
 });
 
 test('mínimo de membros aceita zero e inteiros e mantém compatibilidade',()=>{assert.equal(validateSettings({...DEFAULTS,minMembers:undefined}).minMembers,0);assert.equal(validateSettings({...DEFAULTS,minMembers:100}).minMembers,100);for(const minMembers of [-1,1.1,'100',100000001])assert.throws(()=>validateSettings({...DEFAULTS,minMembers}));});
+
+test('texto do botão não corta emoji ao meio e remove surrogate solto',()=>{
+ const lone=/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+ const title='a'.repeat(59)+'😀 fim';
+ const pages=makePages([{id:-1,title,url:'https://t.me/testecanal',status:'approved',category:0}],{...DEFAULTS,footerButtons:false},0,[],'bot');
+ const text=pages[0].reply_markup.inline_keyboard[0][0].text;
+ assert.equal(lone.test(text),false);
+ assert.ok(text.length<=60);
+ assert.equal(text,'a'.repeat(59));
+});
 
 test('modo manutenção valida estado e permite mensagem vazia para silêncio',()=>{
  const saved=validateSettings({...DEFAULTS,maintenance:{enabled:true,message:'  <b>Voltamos já</b>  '}});
@@ -107,11 +120,11 @@ test('cores dos botões: global, tipo canal/grupo e individual com precedência 
  const s={
   ...DEFAULTS,
   order:'manual',
-  rowPattern:[4],
   buttonColor:'primary',
   channelColor:'success',
   groupColor:'',
-  chatColors:{'4':'danger'}
+  chatColors:{'4':'danger'},
+  buttonLayout:{enabled:true,fill:'random',rows:[[{kind:'auto'},{kind:'auto'},{kind:'auto'},{kind:'auto'}]]}
  };
  const rows=makePages(chats,s)[0].reply_markup.inline_keyboard[0];
  assert.equal(rows[0].style,'success');
@@ -120,95 +133,116 @@ test('cores dos botões: global, tipo canal/grupo e individual com precedência 
  assert.equal(rows[3].style,'danger');
 });
 
-test('listType validação e valor padrão',()=>{
- assert.equal(validateSettings({...DEFAULTS,listType:'simple'}).listType,'simple');
+test('listType é sempre misto; o antigo modo simples foi removido',()=>{
+ assert.equal(validateSettings({...DEFAULTS,listType:'simple'}).listType,'mixed');
  assert.equal(validateSettings({...DEFAULTS,listType:'mixed'}).listType,'mixed');
  assert.equal(validateSettings({...DEFAULTS,listType:'invalid'}).listType,'mixed');
+ assert.equal(validateSettings({...DEFAULTS,order:'rotate'}).order,'alphabetical');
 });
 
-test('resolveListAds e makePages com posições início, meio e fim',()=>{
- const chats = Array.from({length: 6}, (_, i) => ({
-  id: i + 1, position: i, title: 'Chat ' + (i + 1), url: 'https://t.me/chat' + (i + 1), status: 'approved', category: 0
+test('posições de divulgação aleatória usam anúncios únicos e excluem os fixos',()=>{
+ const chats = Array.from({length: 4}, (_, i) => ({
+  id: i + 1, position: i, title: 'Canal ' + (i + 1), url: 'https://t.me/chat' + (i + 1), status: 'approved', category: 0
  }));
  const ads = [
-  { id: 101, title: 'Patrocinador Topo', url: 'https://t.me/topo', style: 'primary' },
-  { id: 102, title: 'Patrocinador Centro', url: 'https://t.me/centro', style: 'success' },
-  { id: 103, title: 'Patrocinador Rodapé', url: 'https://t.me/rodape', style: 'danger' }
+  { id: 101, title: 'Patrocinador Fixo', url: 'https://t.me/fixo', style: 'primary' },
+  { id: 102, title: 'Patrocinador Dois', url: 'https://t.me/dois', style: 'success' },
+  { id: 103, title: 'Patrocinador Três', url: 'https://t.me/tres', style: 'danger' }
  ];
-
- const s = {
+ const settings = {
   ...DEFAULTS,
   order: 'manual',
-  rowPattern: [2, 2],
   footerButtons: false,
-  listAdsConfig: {
+  buttonLayout: {
    enabled: true,
-   mode: 'fixed',
-   sameAdAcrossSlots: false,
-   slots: {
-    start: { enabled: true, adId: 101 },
-    middle: { enabled: true, adId: 102 },
-    end: { enabled: true, adId: 103 }
-   }
+   fill: 'random',
+   rows: [
+    [{ kind: 'ad', adId: 101 }, { kind: 'adRandom' }],
+    [{ kind: 'adRandom' }, { kind: 'auto' }]
+   ]
   }
  };
-
- const pages = makePages(chats, s, 0, ads);
+ const pages = makePages(chats, settings, 0, ads);
  const rows = pages[0].reply_markup.inline_keyboard;
- // Top slot (início)
- assert.equal(rows[0][0].text, 'Patrocinador Topo');
- assert.equal(rows[0][0].style, 'primary');
- // End slot (fim)
- assert.equal(rows[rows.length - 1][0].text, 'Patrocinador Rodapé');
- assert.equal(rows[rows.length - 1][0].style, 'danger');
- // Middle slot exists
- const mid = rows.find(r => r.length === 1 && r[0].text === 'Patrocinador Centro');
- assert.ok(mid);
- assert.equal(mid[0].style, 'success');
-
- // Test sameAdAcrossSlots
- const sSame = {
-  ...s,
-  listAdsConfig: {
-   ...s.listAdsConfig,
-   sameAdAcrossSlots: true,
-   fixedAdId: 102
-  }
- };
- const pagesSame = makePages(chats, sSame, 0, ads);
- const rowsSame = pagesSame[0].reply_markup.inline_keyboard;
- assert.equal(rowsSame[0][0].text, 'Patrocinador Centro');
- assert.equal(rowsSame[rowsSame.length - 1][0].text, 'Patrocinador Centro');
+ assert.equal(rows[0][0].text, 'Patrocinador Fixo');
+ const randomAds = [rows[0][1], rows[1][0]].map((button) => button.text);
+ assert.equal(new Set(randomAds).size, 2);
+ assert.ok(!randomAds.includes('Patrocinador Fixo'));
+ assert.deepEqual(new Set(randomAds), new Set(['Patrocinador Dois', 'Patrocinador Três']));
 });
 
-test('duas divulgações com início e fim ativos distribui a 1ª no início e a 2ª no fim', () => {
- const chats = Array.from({ length: 4 }, (_, i) => ({
-  id: i + 1, position: i, title: 'Canal ' + (i + 1), url: 'https://t.me/c' + (i + 1), status: 'approved', category: 0
- }));
- const twoAds = [
-  { id: 1, title: 'Parceria Alfa', url: 'https://t.me/alfa', style: 'primary' },
-  { id: 2, title: 'Parceria Beta', url: 'https://t.me/beta', style: 'success' }
- ];
- const s = {
+test('posições aleatórias excedentes não repetem anúncios já usados',()=>{
+ const chats = [{ id: 1, title: 'Canal A', type: 'channel', url: 'https://t.me/canala', status: 'approved', category: 0 }];
+ const ads = [{ id: 7, title: 'Único parceiro', url: 'https://t.me/unico', style: 'primary' }];
+ const settings = {
   ...DEFAULTS,
-  order: 'manual',
-  rowPattern: [2, 2],
   footerButtons: false,
-  listAdsConfig: {
+  buttonLayout: {
    enabled: true,
-   mode: 'fixed',
-   sameAdAcrossSlots: false,
-   slots: {
-    start: { enabled: true, adId: null },
-    middle: { enabled: false, adId: null },
-    end: { enabled: true, adId: null }
-   }
+   fill: 'random',
+   rows: [[{ kind: 'adRandom' }, { kind: 'adRandom' }, { kind: 'adRandom' }, { kind: 'auto' }]]
   }
  };
- const pages = makePages(chats, s, 0, twoAds);
- const rows = pages[0].reply_markup.inline_keyboard;
- assert.equal(rows[0][0].text, 'Parceria Alfa');
- assert.equal(rows[rows.length - 1][0].text, 'Parceria Beta');
+ const rows = makePages(chats, settings, 0, ads)[0].reply_markup.inline_keyboard;
+ assert.equal(rows.flat().filter(b => b.text === 'Único parceiro').length, 1);
+ assert.equal(rows.flat().filter(b => b.text === 'Canal A').length, 1);
+});
+
+test('lista rotativa varia por destino e percorre todos os C/G ao longo das rodadas',()=>{
+ const chats = Array.from({length: 12}, (_, i) => ({
+  id: i + 1, position: i, title: 'Canal ' + String(i + 1).padStart(2, '0'), url: 'https://t.me/rot' + (i + 1), status: 'approved', category: 0
+ }));
+ const settings = {
+  ...DEFAULTS,
+  order: 'manual',
+  footerButtons: false,
+  buttonLayout: { enabled: true, fill: 'random', rotate: true, rows: [[{kind:'auto'},{kind:'auto'}]] }
+ };
+ const page = (roundIndex, destinationId) => makePages(chats, settings, 7, [], '', '', { roundIndex, destinationId })[0]
+  .reply_markup.inline_keyboard.flat().map((button) => button.text);
+
+ const first = page(0, 1);
+ const second = page(0, 2);
+ assert.equal(new Set(first).size, 2);
+ assert.equal(new Set(second).size, 2);
+ assert.notDeepEqual(first, second);
+ assert.notDeepEqual(page(0, 1), page(1, 1));
+
+ const sortedTitles = chats.map((c) => c.title).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+ const firstIndex = sortedTitles.indexOf(first[0]);
+ assert.deepEqual(first, [sortedTitles[firstIndex], sortedTitles[(firstIndex + 1) % sortedTitles.length]]);
+
+ const seen = new Set();
+ for (let round = 0; round < 12; round++) {
+  for (const title of page(round, 1)) seen.add(title);
+ }
+ assert.equal(seen.size, 12);
+});
+
+test('layout padrão tem 10 linhas de 2 botões e vazio volta ao padrão',()=>{
+ const fallback = validateSettings({...DEFAULTS, buttonLayout: undefined});
+ assert.equal(fallback.buttonLayout.enabled, true);
+ assert.equal(fallback.buttonLayout.rows.length, 10);
+ assert.ok(fallback.buttonLayout.rows.every((row) => row.length === 2));
+ assert.deepEqual(validateSettings({...DEFAULTS, buttonLayout: { rows: [] }}).buttonLayout.rows, fallback.buttonLayout.rows);
+
+ const saved = validateSettings({
+  ...DEFAULTS,
+  buttonLayout: { enabled: false, fill: 'random', rotate: true, rows: [[{kind:'adRandom'}],[{kind:'auto'}]] }
+ });
+ assert.equal(saved.buttonLayout.enabled, true);
+ assert.equal(saved.buttonLayout.rotate, true);
+ assert.equal(saved.buttonLayout.rows[0][0].kind, 'adRandom');
+});
+
+test('layout respeita o limite de 100 botões do Telegram contando o rodapé',()=>{
+ const full = Array.from({length: 20}, () => Array.from({length: 5}, () => ({kind:'auto'})));
+ assert.throws(
+  () => validateSettings({...DEFAULTS, buttonLayout: { rows: full }}),
+  /100 botões/i
+ );
+ const noFooter = validateSettings({...DEFAULTS, footerButtons:false, buttonLayout: { rows: full }});
+ assert.equal(noFooter.buttonLayout.rows.length, 20);
 });
 
 test('botão default no fim da lista: Adicionar no meu Canal/Grupo', () => {
@@ -294,7 +328,7 @@ test('layout preenche apenas canais, apenas grupos ou respeita a lista simples',
  assert.deepEqual(rowsFor('random', 'group').sort(), ['Grupo C', 'Grupo D']);
 });
 
-test('layout repete apenas os espaços automáticos e ignora C/G removido', () => {
+test('layout preenche os espaços automáticos uma vez e ignora C/G removido', () => {
  const chats = [
   { id: 1, title: 'Canal A', type: 'channel', url: 'https://t.me/canala', status: 'approved', category: 0 },
   { id: 2, title: 'Grupo B', type: 'group', url: 'https://t.me/grupob', status: 'approved', category: 0 },
@@ -330,12 +364,12 @@ test('layout do painel espelha exatamente o motor usado no envio', () => {
   enabled: true,
   fill: 'random',
   rows: [
-   [{ kind: 'chat', chatId: 2, style: 'success' }, { kind: 'ad', adId: 7, style: 'danger' }, { kind: 'auto', style: 'primary' }],
+   [{ kind: 'chat', chatId: 2, style: 'success' }, { kind: 'ad', adId: 7, style: 'danger' }, { kind: 'adRandom', style: 'primary' }],
    [{ kind: 'auto' }, { kind: 'auto' }]
   ]
  };
 
- for (const options of [{}, { targetType: 'channel' }, { targetType: 'group' }]) {
+ for (const options of [{}, { targetType: 'channel' }, { targetType: 'group' }, { rotation: true, roundIndex: 3, destinationId: 2 }]) {
   assert.deepEqual(
    buildPanelLayoutRows(chats, layout, ads, 42, options),
    buildBackendLayoutRows(chats, layout, ads, 42, options)
@@ -350,7 +384,10 @@ test('validação do layout rejeita posições e divulgações repetidas', () =>
   validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'invalido', rows: [[{ kind: 'auto' }]] } }).buttonLayout.fill,
   'random'
  );
- assert.throws(() => validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'random', rows: [] } }), /layout/i);
+ assert.equal(
+  validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'random', rows: [] } }).buttonLayout.rows.length,
+  10
+ );
  assert.throws(
   () => validateSettings({ ...base, buttonLayout: { enabled: true, fill: 'random', rows: [[{ kind: 'chat', chatId: 1 }, { kind: 'chat', chatId: 1 }]] } }),
   /mesmo canal/i

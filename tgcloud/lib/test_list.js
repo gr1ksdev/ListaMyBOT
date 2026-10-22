@@ -13,48 +13,36 @@ function usableAds(ads) {
 }
 
 function layoutStats(settings) {
- const rows = settings?.buttonLayout?.enabled && Array.isArray(settings.buttonLayout.rows)
-  ? settings.buttonLayout.rows
-  : [];
+ const configured = Array.isArray(settings?.buttonLayout?.rows) ? settings.buttonLayout.rows : [];
+ const rows = configured.length
+  ? configured
+  : Array.from({ length: 10 }, () => [{ kind: 'auto' }, { kind: 'auto' }]);
  let chatCells = 0;
  let adCells = 0;
  for (const row of rows) {
   for (const cell of row || []) {
-   if (cell?.kind === 'ad') adCells++;
+   if (cell?.kind === 'ad' || cell?.kind === 'adRandom') adCells++;
    else chatCells++;
   }
  }
- return { rows, chatCells, adCells, enabled: settings?.buttonLayout?.enabled === true };
+ return { rows, chatCells, adCells };
 }
 
 function targetCounts(real, settings, stats) {
  const realChannels = real.filter(c => c.type === 'channel').length;
  const realGroups = real.filter(c => c.type !== 'channel').length;
- const simple = settings?.listType === 'simple';
  const fill = settings?.buttonLayout?.fill || 'random';
  let channels = realChannels;
  let groups = realGroups;
+ const min = stats.chatCells;
 
- if (stats.enabled) {
-  const min = stats.chatCells;
-  if (simple) {
-   channels = Math.max(channels, min);
-   groups = Math.max(groups, min);
-  } else if (fill === 'channel') {
-   channels = Math.max(channels, min);
-  } else if (fill === 'group') {
-   groups = Math.max(groups, min);
-  } else {
-   channels = Math.max(channels, Math.ceil(min / 2));
-   groups = Math.max(groups, Math.floor(min / 2));
-  }
- } else if (simple) {
-  channels = Math.max(channels, 4);
-  groups = Math.max(groups, 4);
+ if (fill === 'channel') {
+  channels = Math.max(channels, min);
+ } else if (fill === 'group') {
+  groups = Math.max(groups, min);
  } else {
-  const total = Math.max(real.length, 6);
-  channels = Math.max(channels, Math.ceil(total / 2));
-  groups = Math.max(groups, Math.floor(total / 2));
+  channels = Math.max(channels, Math.ceil(min / 2));
+  groups = Math.max(groups, Math.floor(min / 2));
  }
 
  return { channels, groups };
@@ -133,8 +121,11 @@ export function supplementTestData(chats = [], ads = [], settings = {}) {
    if (Number.isSafeInteger(id) && !adIds.has(id)) addFakeAd(id);
   }
  }
- if (!stats.enabled && settings?.listAdsConfig?.enabled && !realAds.length) {
-  addFakeAd(FIRST_FAKE_AD_ID);
+ let nextFakeAdId = FIRST_FAKE_AD_ID;
+ while (realAds.length + fakeAds.length < stats.adCells) {
+  while (adIds.has(nextFakeAdId)) nextFakeAdId--;
+  addFakeAd(nextFakeAdId);
+  nextFakeAdId--;
  }
 
  return {

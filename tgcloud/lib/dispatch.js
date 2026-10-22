@@ -11,29 +11,32 @@ export async function createRound(){
  if(await db.get("SELECT id FROM list_rounds WHERE status='active' LIMIT 1"))throw new EndpointError('Já existe um envio em andamento.');
  const {settings}=await config();
  if(normalizeMaintenance(settings.maintenance).enabled)throw new EndpointError('O modo manutenção está ativado. Desative-o antes de enviar a lista.');
- const [list,ads,me]=await Promise.all([db.all("SELECT * FROM list_chats WHERE status='approved'"),db.all('SELECT * FROM list_ads ORDER BY slot_row,slot_col,id'),api.getMe().catch(()=>null)]);
+ const [list,ads,me,roundCount]=await Promise.all([
+  db.all("SELECT * FROM list_chats WHERE status='approved'"),
+  db.all('SELECT * FROM list_ads ORDER BY slot_row,slot_col,id'),
+  api.getMe().catch(()=>null),
+  db.get('SELECT count(*) AS n FROM list_rounds')
+ ]);
  const seed = Math.floor(Date.now()/60000);
  const botUsername = me?.username || '';
- if (settings.listType === 'simple') {
-  const channelList = list.filter(c => c.type === 'channel');
-  const groupList = list.filter(c => c.type !== 'channel');
-  const channelPages = makePages(channelList, settings, seed, ads, botUsername, 'channel');
-  const groupPages = makePages(groupList, settings, seed, ads, botUsername, 'group');
-  if (!channelPages.length && !groupPages.length) throw new EndpointError('Nenhum participante aprovado com link válido.');
-  const id = String(Date.now());
-  const content = {
-   settings,
-   listType: 'simple',
-   channelPages,
-   groupPages,
-   pages: channelPages.length ? channelPages : groupPages,
-   destinations: list.map(c => c.id)
-  };
-  await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')', { ':id': id, ':n': Date.now(), ':c': JSON.stringify(content) });
-  return id;
- }
- const pages=makePages(list,settings,seed,ads,botUsername);if(!pages.length)throw new EndpointError('Nenhum participante aprovado com link válido.');
- const id=String(Date.now());await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')',{':id':id,':n':Date.now(),':c':JSON.stringify({pages,settings,listType:'mixed',destinations:list.map(c=>c.id)})});return id;
+ const roundIndex = Number(roundCount?.n || 0);
+ const preview = makePages(list,settings,seed,ads,botUsername,'',{roundIndex,destinationId:list[0]?.id||0});
+ if(!preview.length)throw new EndpointError('Nenhum participante aprovado com link válido.');
+ // Store the snapshot, not one page for everyone: dispatch rebuilds the
+ // keyboard per destination so the rotating layout can differ by chat.
+ const content={
+  settings,
+  listType:'mixed',
+  chats:list,
+  ads,
+  botUsername,
+  roundSeed:seed,
+  roundIndex,
+  destinations:list.map(c=>c.id)
+ };
+ const id=String(Date.now());
+ await db.run('INSERT INTO list_rounds(id,created,content,status) VALUES(:id,:n,:c,\'active\')',{':id':id,':n':Date.now(),':c':JSON.stringify(content)});
+ return id;
 }
 export async function removeLists() {
  const chats = await db.all("SELECT id, last_messages FROM list_chats WHERE last_messages != '[]' AND last_messages != ''");
@@ -91,14 +94,27 @@ export async function processQueue({scheduled=false}={}){
  const chat=await getChat(job.chat);
  if(!chat||chat.status!=='approved'){await finish(job,'skipped','Participação inativa');continue;}
  const claim=await db.run("UPDATE list_deliveries SET status='sending',available=:n,attempts=attempts+1 WHERE id=:id AND status='pending'",{':n':now+120000,':id':job.id});if(!claim.rowsAffected)continue;
- let targetPages=content.pages;
- if(content.listType==='simple'){
-  const isChannel=chat.type==='channel';
-  targetPages=isChannel?content.channelPages:content.groupPages;
-  if(!targetPages||!targetPages.length){
-   await finish(job,'skipped',isChannel?'Nenhum canal na lista simples':'Nenhum grupo na lista simples');
-   continue;
+ let targetPages;
+ if(Array.isArray(content.chats)&&content.settings){
+  const pages=makePages(content.chats,content.settings,content.roundSeed||0,content.ads||[],content.botUsername||'','',{
+   roundIndex:content.roundIndex||0,
+   destinationId:chat.id
+  });
+  targetPages=pages.length?[pages[0]]:[];
+ }else{
+  targetPages=content.pages;
+  if(content.listType==='simple'){
+   const isChannel=chat.type==='channel';
+   targetPages=isChannel?content.channelPages:content.groupPages;
+   if(!targetPages||!targetPages.length){
+    await finish(job,'skipped',isChannel?'Nenhum canal na lista simples':'Nenhum grupo na lista simples');
+    continue;
+   }
   }
+ }
+ if(!targetPages||!targetPages.length){
+  await finish(job,'skipped','Nenhuma lista disponível');
+  continue;
  }
  let sent;
  try{

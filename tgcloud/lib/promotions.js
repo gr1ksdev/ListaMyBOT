@@ -1,5 +1,5 @@
 import { api, db } from 'sdk';
-import { validLink } from './domain.js';
+import { validLink, truncateButtonText } from './domain.js';
 import { config, isAdmin } from './store.js';
 import { chatAdmin } from './registration.js';
 import { escHtml } from './navigation.js';
@@ -254,7 +254,7 @@ export async function approvePromotion(promoId, reviewer) {
   const channelText = formatPromoChannelMessage(promo);
   const channelMarkup = {
     inline_keyboard: [
-      [{ text: promo.title.slice(0, 50), url: promo.url }],
+      [{ text: truncateButtonText(promo.title, 50), url: promo.url }],
       [{ text: `🤖 Divulgue no @${botUsername}`, url: `https://t.me/${botUsername}?start=divulgar` }]
     ]
   };

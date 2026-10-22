@@ -1,5 +1,5 @@
 import { api, db } from 'sdk';
-import { APP_URL, OWNER, escHtml } from './domain.js';
+import { APP_URL, OWNER, escHtml, truncateButtonText } from './domain.js';
 import { isAdmin, state, putState, config } from './store.js';
 import { getActiveTicketForUser } from './support.js';
 export { escHtml };
@@ -179,7 +179,7 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
    text += `<blockquote><b><i>Selecione um canal abaixo para acompanhar o status, categoria ou configurações:</i></b></blockquote>`;
    for (const c of list) {
     const icon = c.status === 'approved' ? '✅ ' : c.status === 'pending' ? '⏳ ' : '⚙️ ';
-    rows.push([{ text: icon + c.title.slice(0, 45), callback_data: `cfg:${c.id}` }]);
+    rows.push([{ text: icon + truncateButtonText(c.title, 45), callback_data: `cfg:${c.id}` }]);
    }
   }
   rows.push([{ text: '➕ Conectar canal', url: `https://t.me/${me.username}?startchannel&admin=post_messages+edit_messages+delete_messages` }]);
@@ -204,7 +204,7 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
    text += `<blockquote><b><i>Selecione um grupo abaixo para acompanhar o status, categoria ou configurações:</i></b></blockquote>`;
    for (const c of list) {
     const icon = c.status === 'approved' ? '✅ ' : c.status === 'pending' ? '⏳ ' : '⚙️ ';
-    rows.push([{ text: icon + c.title.slice(0, 45), callback_data: `cfg:${c.id}` }]);
+    rows.push([{ text: icon + truncateButtonText(c.title, 45), callback_data: `cfg:${c.id}` }]);
    }
   }
   rows.push([{ text: '➕ Conectar grupo', url: `https://t.me/${me.username}?startgroup=participar&admin=delete_messages+pin_messages` }]);
@@ -320,7 +320,7 @@ export async function privateScreen(user, view = 'home', message, fromUser) {
   }
   for (const c of list) {
    rows.push([{
-    text: (c.status === 'approved' ? '✅ ' : c.status === 'pending' ? '⏳ ' : '⚙️ ') + c.title.slice(0, 50),
+    text: (c.status === 'approved' ? '✅ ' : c.status === 'pending' ? '⏳ ' : '⚙️ ') + truncateButtonText(c.title, 50),
     callback_data: `${view === 'links' ? 'link' : 'cfg'}:${c.id}`
    }]);
   }

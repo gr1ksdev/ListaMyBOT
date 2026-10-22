@@ -1,16 +1,27 @@
-import {layoutPattern,repeatRows,paginateRows,buildLayoutRows} from './layout.js';
+import {layoutPattern,buildLayoutRows,defaultLayoutRows} from './layout.js';
 export const OWNERS = [7595607953, 8474484790];
 export const OWNER = 7595607953;
 export function isOwner(id) {
  return OWNERS.includes(Number(id));
 }
-export const APP_URL = 'https://app8718726006.tgcloud.ai/';
+export const APP_URL = 'https://app8272402928.tgcloud.ai/';
 export function escHtml(str) {
  return String(str ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
+}
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+// Telegram rejects inline keyboard buttons whose text contains a lone surrogate.
+// A normal .slice() can cut an emoji in half, so trim without breaking pairs.
+export function truncateButtonText(value, max = 60) {
+ const text = String(value ?? '').replace(LONE_SURROGATE, '');
+ if (text.length <= max) return text;
+ let end = max;
+ const last = text.charCodeAt(end - 1);
+ if (last >= 0xD800 && last <= 0xDBFF) end--;
+ return text.slice(0, end);
 }
 export const CATEGORIES = [
  '🎮 Jogos',
@@ -52,16 +63,17 @@ export function normalizeCategories(value) {
  return clean;
 }
 export const BUTTON_LAYOUT_FILLS = ['random', 'group', 'channel'];
-export const DEFAULT_BUTTON_LAYOUT = { enabled: false, fill: 'random', rows: [] };
-export function normalizeButtonLayout(value) {
+export const DEFAULT_BUTTON_LAYOUT = { enabled: true, fill: 'random', rotate: false, rows: defaultLayoutRows() };
+export function normalizeButtonLayout(value, options = {}) {
  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
  if (source.rows !== undefined && !Array.isArray(source.rows)) throw Error('Layout de botões inválido.');
- if (Array.isArray(source.rows) && source.rows.length > 20) throw Error('O layout pode ter no máximo 20 linhas.');
+ const sourceRows = Array.isArray(source.rows) && source.rows.length ? source.rows : defaultLayoutRows();
+ if (sourceRows.length > 20) throw Error('O layout pode ter no máximo 20 linhas.');
  const rows = [];
  const usedChats = new Set();
  const usedAds = new Set();
  let total = 0;
- for (const rawRow of Array.isArray(source.rows) ? source.rows : []) {
+ for (const rawRow of sourceRows) {
   if (!Array.isArray(rawRow) || !rawRow.length || rawRow.length > 5) {
    throw Error('Cada linha do layout precisa ter de 1 a 5 botões.');
   }
@@ -76,10 +88,17 @@ export function normalizeButtonLayout(value) {
     usedChats.add(rawCell.chatId);
     row.push({ kind: 'chat', chatId: rawCell.chatId, ...styleFields });
    } else if (kind === 'ad') {
-    if (!Number.isSafeInteger(rawCell.adId) || rawCell.adId <= 0) throw Error('Divulgação fixa inválida no layout.');
-    if (usedAds.has(rawCell.adId)) throw Error('A mesma divulgação não pode ocupar duas posições no layout.');
-    usedAds.add(rawCell.adId);
-    row.push({ kind: 'ad', adId: rawCell.adId, ...styleFields });
+    const adId = Number.isSafeInteger(rawCell.adId) && rawCell.adId > 0 ? rawCell.adId : null;
+    const adKey = options.allowAdKey && Number.isSafeInteger(rawCell.adKey) && rawCell.adKey > 0
+     ? rawCell.adKey
+     : null;
+    if (!adId && !adKey) throw Error('Divulgação fixa inválida no layout.');
+    const adRef = adId ?? adKey;
+    if (usedAds.has(adRef)) throw Error('A mesma divulgação não pode ocupar duas posições no layout.');
+    usedAds.add(adRef);
+    row.push(adId ? { kind: 'ad', adId, ...styleFields } : { kind: 'ad', adKey, ...styleFields });
+   } else if (kind === 'adRandom') {
+    row.push({ kind: 'adRandom', ...styleFields });
    } else {
     row.push({ kind: 'auto', ...styleFields });
    }
@@ -88,26 +107,13 @@ export function normalizeButtonLayout(value) {
   if (total > 100) throw Error('O layout pode ter no máximo 100 botões.');
   rows.push(row);
  }
- const enabled = source.enabled === true;
- if (enabled && !rows.length) throw Error('Adicione ao menos uma linha ao layout personalizado.');
  return {
-  enabled,
+  enabled: true,
   fill: BUTTON_LAYOUT_FILLS.includes(source.fill) ? source.fill : 'random',
+  rotate: source.rotate === true,
   rows
  };
 }
-export const DEFAULT_LIST_ADS = {
- enabled: false,
- mode: 'fixed',
- sameAdAcrossSlots: true,
- slots: {
-  start: { enabled: false, adId: null },
-  middle: { enabled: false, adId: null },
-  end: { enabled: false, adId: null }
- },
- randomPool: [],
- fixedAdId: null
-};
 export const DEFAULT_MAINTENANCE_MESSAGE = '🛠️ <b>Bot em manutenção</b>\n\nEstamos fazendo ajustes e voltamos em breve. Obrigado pela paciência!';
 export function normalizeMaintenance(value) {
  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -116,7 +122,7 @@ export function normalizeMaintenance(value) {
   message: typeof source.message === 'string' ? source.message : DEFAULT_MAINTENANCE_MESSAGE
  };
 }
-export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, maintenance:{ enabled:false, message:DEFAULT_MAINTENANCE_MESSAGE }, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, supportLogTopic:0, listType:'mixed', listAdsConfig:JSON.parse(JSON.stringify(DEFAULT_LIST_ADS)), footerButtons:true, categories:[...CATEGORIES], buttonLayout:JSON.parse(JSON.stringify(DEFAULT_BUTTON_LAYOUT)) };
+export const DEFAULTS = { admins:[...OWNERS], approval:'manual', minMembers:0, text:'📢 Conheça os canais e grupos da nossa comunidade!\n\nToque nos botões abaixo para participar.', columns:2, order:'alphabetical', groupCategories:false, deletePrevious:false, pin:false, bannedUsers:[], buttonColor:'', channelColor:'', groupColor:'', chatColors:{}, maintenance:{ enabled:false, message:DEFAULT_MAINTENANCE_MESSAGE }, schedule:{ enabled:false, mode:'fixed', minutes:60, times:['08:00','20:00'], nextAt:0 }, removalSchedule:{ enabled:false, mode:'fixed', minutes:60, times:['06:00','18:00'], nextAt:0 }, promoLogChat:0, promoLogTopic:0, promoChannel:'', chatsLogTopic:0, supportLogTopic:0, listType:'mixed', footerButtons:true, categories:[...CATEGORIES], buttonLayout:JSON.parse(JSON.stringify(DEFAULT_BUTTON_LAYOUT)) };
 function scheduleConfigKey(s) {
  return JSON.stringify({
   enabled: s.enabled,
@@ -132,6 +138,7 @@ export function validateSettings(input, now=Date.now(), previous=null) {
  if(!['manual','automatic'].includes(s.approval)) throw Error('Escolha o modo de aprovação.');
  if(typeof s.text!=='string'||!s.text.trim()||s.text.length>3500) throw Error('A mensagem precisa ter entre 1 e 3.500 caracteres.');
  if(![1,2,3,4,5].includes(s.columns)||!['alphabetical','manual','rotate'].includes(s.order)) throw Error('Layout inválido.');
+ s.order = s.order === 'manual' ? 'manual' : 'alphabetical';
  s.rowPattern=layoutPattern(s);
  if(!Array.isArray(s.admins)||s.admins.length>20||s.admins.some(x=>!Number.isSafeInteger(x)||x<=0)) throw Error('IDs de administradores inválidos.');
  s.admins=[...new Set([...OWNERS,...s.admins])];
@@ -140,6 +147,11 @@ export function validateSettings(input, now=Date.now(), previous=null) {
  // stored instead of resetting the categories/layout on an unrelated save.
  s.categories = normalizeCategories(s.categories === undefined ? (previous?.categories ?? CATEGORIES) : s.categories);
  s.buttonLayout = normalizeButtonLayout(s.buttonLayout === undefined ? previous?.buttonLayout : s.buttonLayout);
+ s.footerButtons = s.footerButtons !== false;
+ const layoutButtons = s.buttonLayout.rows.reduce((n, row) => n + row.length, 0);
+ if (layoutButtons + (s.footerButtons ? 1 : 0) > 100) {
+  throw Error('O layout pode ter no máximo 100 botões no Telegram' + (s.footerButtons ? ' (incluindo o rodapé)' : '') + '.');
+ }
  s.buttonColor = typeof s.buttonColor === 'string' && AD_STYLES.includes(s.buttonColor) ? s.buttonColor : '';
  s.channelColor = typeof s.channelColor === 'string' && AD_STYLES.includes(s.channelColor) ? s.channelColor : '';
  s.groupColor = typeof s.groupColor === 'string' && AD_STYLES.includes(s.groupColor) ? s.groupColor : '';
@@ -195,34 +207,9 @@ export function validateSettings(input, now=Date.now(), previous=null) {
  s.promoLogTopic = Number.isSafeInteger(s.promoLogTopic) ? s.promoLogTopic : 0;
  s.chatsLogTopic = Number.isSafeInteger(s.chatsLogTopic) ? s.chatsLogTopic : 0;
  s.promoChannel = typeof s.promoChannel === 'string' ? s.promoChannel : (Number.isSafeInteger(s.promoChannel) ? String(s.promoChannel) : '');
- s.listType = ['mixed', 'simple'].includes(s.listType) ? s.listType : 'mixed';
- if (s.listAdsConfig && typeof s.listAdsConfig === 'object') {
-  const lac = s.listAdsConfig;
-  s.listAdsConfig = {
-   enabled: Boolean(lac.enabled),
-   mode: ['fixed', 'random'].includes(lac.mode) ? lac.mode : 'fixed',
-   sameAdAcrossSlots: Boolean(lac.sameAdAcrossSlots),
-   slots: {
-    start: {
-     enabled: Boolean(lac.slots?.start?.enabled),
-     adId: Number.isSafeInteger(lac.slots?.start?.adId) ? lac.slots.start.adId : null
-    },
-    middle: {
-     enabled: Boolean(lac.slots?.middle?.enabled),
-     adId: Number.isSafeInteger(lac.slots?.middle?.adId) ? lac.slots.middle.adId : null
-    },
-    end: {
-     enabled: Boolean(lac.slots?.end?.enabled),
-     adId: Number.isSafeInteger(lac.slots?.end?.adId) ? lac.slots.end.adId : null
-    }
-   },
-   randomPool: Array.isArray(lac.randomPool) ? lac.randomPool.filter(x => Number.isSafeInteger(x) && x > 0) : [],
-   fixedAdId: Number.isSafeInteger(lac.fixedAdId) ? lac.fixedAdId : null
-  };
- } else {
-  s.listAdsConfig = JSON.parse(JSON.stringify(DEFAULT_LIST_ADS));
- }
- s.footerButtons = s.footerButtons !== false;
+ s.listType = 'mixed';
+ // Legacy strategic ad slots are no longer used; drop them on the next save.
+ delete s.listAdsConfig;
  return s;
 }
 export function nextTime(a, now=Date.now()) {
@@ -245,81 +232,10 @@ export function resolveButtonStyle(c, s, layoutStyle = '') {
  if (s?.buttonColor && AD_STYLES.includes(s.buttonColor)) return s.buttonColor;
  return '';
 }
-export function resolveListAds(s, ads = [], seed = 0) {
- if (!s?.listAdsConfig?.enabled || !Array.isArray(ads) || !ads.length) {
-  return { start: null, middle: null, end: null };
- }
- const cfg = s.listAdsConfig;
- const validAds = ads.filter(a => a && a.title && a.url);
- if (!validAds.length) return { start: null, middle: null, end: null };
- const getAdKey = a => (a.id != null ? a.id : a.key);
- const adsById = new Map(validAds.map(a => [getAdKey(a), a]));
-
- const activeSlots = [];
- if (cfg.slots?.start?.enabled) activeSlots.push('start');
- if (cfg.slots?.middle?.enabled) activeSlots.push('middle');
- if (cfg.slots?.end?.enabled) activeSlots.push('end');
- if (!activeSlots.length) return { start: null, middle: null, end: null };
-
- const result = { start: null, middle: null, end: null };
-
- if (cfg.mode === 'fixed') {
-  if (cfg.sameAdAcrossSlots) {
-   const targetId = cfg.fixedAdId || cfg.slots?.start?.adId || cfg.slots?.middle?.adId || cfg.slots?.end?.adId;
-   const targetAd = (targetId && adsById.get(targetId)) || validAds[0];
-   for (const slot of activeSlots) result[slot] = targetAd;
-  } else {
-   const usedIds = new Set();
-   for (const slot of activeSlots) {
-    const explicitId = cfg.slots?.[slot]?.adId;
-    if (explicitId && adsById.has(explicitId)) {
-     result[slot] = adsById.get(explicitId);
-     usedIds.add(explicitId);
-    }
-   }
-   let fallbackIdx = 0;
-   for (const slot of activeSlots) {
-    if (!result[slot]) {
-     let candidate = validAds.find(a => !usedIds.has(getAdKey(a)));
-     if (candidate) {
-      result[slot] = candidate;
-      usedIds.add(getAdKey(candidate));
-     } else {
-      result[slot] = validAds[fallbackIdx % validAds.length];
-      fallbackIdx++;
-     }
-    }
-   }
-  }
- } else if (cfg.mode === 'random') {
-  let pool = (cfg.randomPool || []).map(id => adsById.get(id)).filter(Boolean);
-  if (!pool.length) pool = validAds.slice();
-
-  if (cfg.sameAdAcrossSlots) {
-   const pickIndex = Math.abs(seed) % pool.length;
-   const picked = pool[pickIndex];
-   for (const slot of activeSlots) result[slot] = picked;
-  } else {
-   const shuffled = [...pool].sort((a, b) => {
-    const hashA = (a.id * 31 + seed) % 1000;
-    const hashB = (b.id * 31 + seed) % 1000;
-    return hashA - hashB;
-   });
-   let i = 0;
-   for (const slot of activeSlots) {
-    result[slot] = shuffled[i % shuffled.length];
-    i++;
-   }
-  }
- }
-
- return result;
-}
-export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='') {
+export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='',options={}) {
  let list=chats.filter(c=>c.status==='approved'&&validLink(c.url)).slice();
  if(s.order==='manual')list.sort((a,b)=>a.position-b.position||a.id-b.id);
  else list.sort((a,b)=>(a.display||a.title).localeCompare(b.display||b.title,'pt-BR'));
- if(s.order==='rotate'&&list.length){const n=Math.abs(seed)%list.length;list=[...list.slice(n),...list.slice(0,n)];}
  if(s.groupCategories)list.sort((a,b)=>a.category-b.category);
  const categories=resolveCategories(s);
  const makeChatButton=(c,layoutStyle='')=>{
@@ -327,7 +243,7 @@ export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='') {
   const prefix=s.groupCategories&&cat?cat.split(' ')[0]+' ':'';
   const style=resolveButtonStyle(c,s,layoutStyle);
   return {
-   text:(prefix+(c.display||c.title)).slice(0,60),
+   text:truncateButtonText(prefix+(c.display||c.title),60),
    url:c.url,
    ...(style?{style}:{})
   };
@@ -335,44 +251,23 @@ export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='') {
  const makeAdButton=(ad,layoutStyle='')=>{
   const style=AD_STYLES.includes(layoutStyle)?layoutStyle:ad.style;
   return {
-   text:String(ad.title).slice(0,60),
+   text:truncateButtonText(ad.title,60),
    url:ad.url,
    ...(AD_STYLES.includes(style)?{style}:{})
   };
  };
 
- let rows;
- if (s.buttonLayout?.enabled) {
-  // The panel-drawn layout is authoritative: pinned chats/ads keep their
-  // positions, auto cells are filled at send time and the layout repeats for
-  // the remaining participants using only its auto cells.
-  const layoutRows=buildLayoutRows(list,s.buttonLayout,ads,seed,{targetType});
-  rows=layoutRows.map(row=>row.map(cell=>cell.kind==='ad'?makeAdButton(cell.ad,cell.style):makeChatButton(cell.chat,cell.style)));
- } else {
-  const buttons=list.map(makeChatButton);
-  const promoSlots = resolveListAds(s, ads, seed);
-  const hasNewAds = Boolean(promoSlots.start || promoSlots.middle || promoSlots.end);
-  if (hasNewAds) {
-   rows = repeatRows(buttons, layoutPattern(s), []);
-   if (promoSlots.end) {
-    rows.push([makeAdButton(promoSlots.end)]);
-   }
-   if (promoSlots.middle) {
-    if (rows.length === 0) {
-     rows.push([makeAdButton(promoSlots.middle)]);
-    } else {
-     const midIdx = Math.max(1, Math.floor(rows.length / 2));
-     rows.splice(midIdx, 0, [makeAdButton(promoSlots.middle)]);
-    }
-   }
-   if (promoSlots.start) {
-    rows.unshift([makeAdButton(promoSlots.start)]);
-   }
-  } else {
-   const slots=(ads||[]).filter(a=>a.title&&a.url).map(a=>({row:a.slot_row,col:a.slot_col,button:makeAdButton(a)}));
-   rows = repeatRows(buttons, layoutPattern(s), slots);
-  }
- }
+ // The panel-drawn layout is authoritative. It is resolved once: fixed cells
+ // stay, random ads are unique and auto cells are filled up to the drawn count.
+ // Extra approved chats never create a second message.
+ const layout=normalizeButtonLayout(s.buttonLayout,{allowAdKey:true});
+ const layoutRows=buildLayoutRows(list,layout,ads,seed,{
+  targetType,
+  rotation:layout.rotate===true,
+  roundIndex:options.roundIndex||0,
+  destinationId:options.destinationId||0
+ });
+ const rows=layoutRows.map(row=>row.map(cell=>cell.kind==='ad'?makeAdButton(cell.ad,cell.style):makeChatButton(cell.chat,cell.style)));
 
  if (s.footerButtons !== false) {
   const actualBotUsername = botUsername || s.botUsername || 'ListaMyBOT';
@@ -382,9 +277,8 @@ export function makePages(chats,s,seed=0,ads=[],botUsername='',targetType='') {
   ]);
  }
 
- const groups=paginateRows(rows);
- const pages=groups.map((pageRows,i)=>({text:s.text+(groups.length>1?`\n\nParte ${i+1}/${groups.length}`:''),reply_markup:{inline_keyboard:pageRows}}));
- return pages;
+ if (!rows.length) return [];
+ return [{text:s.text,reply_markup:{inline_keyboard:rows}}];
 }
 export function validLink(s){return typeof s==='string'&&/^https:\/\/t\.me\/(?:[A-Za-z][A-Za-z0-9_]{3,}|\+[A-Za-z0-9_-]+|joinchat\/[A-Za-z0-9_-]+)\/?$/.test(s);}
 export function permissionErrors(chat,m){

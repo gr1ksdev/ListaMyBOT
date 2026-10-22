@@ -3,7 +3,7 @@
 Bot e painel administrativo publicados em Telegram Serverless.
 
 - Bot: https://t.me/ListaMyBOT
-- Mini App: https://app8718726006.tgcloud.ai/
+- Mini App: https://app8272402928.tgcloud.ai/
 - Administrador principal: `7595607953`.
 - Abra o bot e envie `/admin` para entrar no painel. A URL sozinha não autentica o usuário.
 
@@ -92,7 +92,8 @@ Pastas:
 - `tgcloud/handlers`: mensagens, publicações de canal, callbacks e mudanças do status do bot.
 - `tgcloud/endpoints`: operações administrativas autenticadas.
 - `tgcloud/lib`: cadastro, permissões, armazenamento e distribuição.
-- `frontend`: interface sem etapa de compilação de framework; `npm run build` copia para `dist`.
+- `src`: interface React/Vite; `npm run build` gera `dist`.
+- `frontend`: painel antigo mantido apenas para testes de compatibilidade.
 - `scheduler`: Worker de agendamento para Cloudflare.
 - `tests`: testes de regras, Worker e verificação visual opcional.
 
@@ -104,27 +105,30 @@ Respostas 429 respeitam `retry_after`. Se houver erro de rede/servidor e não fo
 
 Participantes removidos/sem permissões são pausados. Somente as mensagens da última lista registradas pelo bot podem ser removidas; falhas de apagar/fixar ficam no participante. Horários perdidos não geram uma avalanche de rodadas atrasadas. Pausar agendamento impede novas rodadas e não cancela a rodada já iniciada.
 
-## Organizador de padrões (15/10/2026)
+## Organizador da lista (22/10/2026)
 
-Na aba Lista, desenhe um padrão de 1 a 20 linhas com 1 a 5 botões em cada linha.
-Por exemplo, `[1, 2, 1]` distribui todos os participantes em linhas com um, dois e um
-botão, repetindo até o fim. Linhas vazias do editor são ignoradas. Os nomes
-cadastrados e fictícios escolhidos no editor são amostras: apenas as quantidades
-por linha são salvas em `rowPattern`. A ordem dos participantes continua definida
-por ordem alfabética, posição manual ou rotação, com agrupamento opcional.
+A aba Lista usa somente o Layout Personalizado. Cada célula é um C/G automático,
+um C/G fixo, uma divulgação fixa ou uma divulgação aleatória. O desenho é a
+mensagem final: a quantidade de células de C/G define o limite da lista (padrão
+10 linhas × 2 = 20). Canais/grupos excedentes ficam fora da mensagem e não geram
+uma segunda parte; o rodapé e as divulgações não contam nesse limite. O layout é
+resolvido uma única vez, sem repetir o desenho para completar a lista.
 
-Arraste pelo ícone de seis pontos ou toque no botão e na posição de destino.
-É possível subir uma linha, excluir uma linha, remover um botão e adicionar amostras
-no seletor inferior. A prévia e os envios compartilham `tgcloud/lib/layout.js`.
-A paginação preserva as linhas e a continuidade do padrão, com no máximo 40 botões
-e 20 linhas por mensagem. Configurações antigas de colunas continuam compatíveis.
-Não há migração do banco nem ativação automática de agendamento nesta atualização.
+Cada divulgação aparece no máximo uma vez por lista. Posições aleatórias sorteiam
+apenas anúncios ainda não usados e excluem os fixos. O painel e o endpoint
+bloqueiam mais posições de divulgação do que anúncios cadastrados. Ao apagar um
+anúncio usado, a posição fixa correspondente é removida do layout; ela não vira
+um botão de C/G.
 
-Validação: 30 testes (`npm test`) e Chromium real: arraste por ponteiro, salvar,
-seletor, 100 botões e navegação pelas cinco abas em 320, 390, 768 e 1280 px, sem
-rolagem horizontal. `tests/ui-check.cjs` requer Playwright instalado e inicia seu
-próprio servidor de teste; as chamadas de SDK são simuladas e não enviam mensagens.
-Execute `npm run build` antes do teste visual para gerar também o módulo compartilhado.
+Com **Lista rotativa** ativada, os C/G automáticos e as divulgações aleatórias
+mudam por destino na mesma rodada e avançam a cada rodada, mantendo a ordem
+alfabética ou manual como base. C/G fixos, divulgações fixas e rodapé não mudam.
+A prévia e o teste no privado mostram uma variação de exemplo; o teste envia uma
+única mensagem e avisa quando completa posições com dados fictícios.
+
+Validação: `npm test`. O teste visual opcional `tests/ui-check.cjs` requer
+Playwright instalado e inicia seu próprio servidor de teste; as chamadas de SDK
+são simuladas e não enviam mensagens.
 
 ## Reconstrução visual da dashboard (15/10/2026)
 

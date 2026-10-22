@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {
-  Sliders,
   Palette,
   Pin,
   Trash2,
@@ -41,7 +40,6 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
   const [channelColor, setChannelColor] = React.useState(settings.channelColor || '');
   const [groupColor, setGroupColor] = React.useState(settings.groupColor || '');
 
-  const [listType, setListType] = React.useState(settings.listType || 'mixed');
   const [approval, setApproval] = React.useState(settings.approval || 'manual');
   const [pin, setPin] = React.useState(Boolean(settings.pin));
   const [deletePrevious, setDeletePrevious] = React.useState(Boolean(settings.deletePrevious));
@@ -80,7 +78,6 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       setButtonColor(data.settings.buttonColor || '');
       setChannelColor(data.settings.channelColor || '');
       setGroupColor(data.settings.groupColor || '');
-      setListType(data.settings.listType || 'mixed');
       setApproval(data.settings.approval || 'manual');
       setPin(Boolean(data.settings.pin));
       setDeletePrevious(Boolean(data.settings.deletePrevious));
@@ -118,26 +115,6 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
       onRefresh?.();
     } catch (err) {
       toast(err.message || 'Falha ao salvar cor', 'error');
-    }
-  };
-
-  const handleToggleListType = async (type) => {
-    setListType(type);
-    if (isDemo) {
-      toast(`Tipo de lista: ${type === 'simple' ? 'Lista Simples' : 'Lista Mista'} (Demo)`, 'info');
-      return;
-    }
-    try {
-      haptic('selection');
-      const updated = { ...settings, listType: type };
-      await saveSettingsSafe(updated, data?.version, onSyncVersion);
-      toast(
-        `Tipo de lista: ${type === 'simple' ? 'Lista Simples (Dividida)' : 'Lista Mista (Canais + Grupos)'}`,
-        'success'
-      );
-      onRefresh?.();
-    } catch (err) {
-      toast(err.message || 'Falha ao salvar tipo de lista', 'error');
     }
   };
 
@@ -454,71 +431,6 @@ export function SettingsTab({ data, onRefresh, isDemo, onToggleDemo, onSyncVersi
 
   return (
     <div className="space-y-4 pb-20 animate-in fade-in duration-300">
-      {/* 0. Tipo de Entrega da Lista (Mista vs Simples) */}
-      <Card className="border-white/10 bg-card">
-        <CardHeader className="p-4 pb-2">
-          <CardTitle className="text-sm font-semibold flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <Sliders className="h-4 w-4 text-primary" />
-              Tipo de Entrega da Lista
-            </span>
-            <Badge variant="secondary" className="text-[10px]">
-              {listType === 'simple' ? 'Lista Simples' : 'Lista Mista'}
-            </Badge>
-          </CardTitle>
-          <CardDescription>
-            Escolha como canais e grupos receberão as publicações oficiais da comunidade.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-4 pt-2">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              onClick={() => handleToggleListType('mixed')}
-              className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                listType === 'mixed'
-                  ? 'border-primary bg-primary/20 text-white font-semibold ring-1 ring-primary/40'
-                  : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <strong className="block text-xs text-foreground">🔄 Lista Mista</strong>
-                {listType === 'mixed' && (
-                  <span className="text-[10px] bg-primary text-white px-1.5 py-0.5 rounded-full font-bold">
-                    Ativa
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] opacity-75 leading-relaxed">
-                Canais e grupos juntos na mesma lista final que será entregue para ambos.
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleToggleListType('simple')}
-              className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
-                listType === 'simple'
-                  ? 'border-primary bg-primary/20 text-white font-semibold ring-1 ring-primary/40'
-                  : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <strong className="block text-xs text-foreground">📑 Lista Simples</strong>
-                {listType === 'simple' && (
-                  <span className="text-[10px] bg-primary text-white px-1.5 py-0.5 rounded-full font-bold">
-                    Ativa
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] opacity-75 leading-relaxed">
-                Tudo dividido: grupos recebem uma lista só de grupos e canais uma lista só de canais.
-              </span>
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* 0.1 Categorias da Lista */}
       <Card className="border-white/10 bg-card">
         <CardHeader className="p-4 pb-2">
