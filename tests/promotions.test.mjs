@@ -415,7 +415,8 @@ test('envio de solicitação de cadastro para o tópico de logs com dados comple
 
   // Linha 2: Abrir no Painel
   assert.equal(kb[1][0].text, '📊 Abrir no Painel');
-  assert.match(kb[1][0].web_app.url, /\?tab=chats&chat=-1001234567/);
+  assert.equal(kb[1][0].web_app, undefined);
+  assert.match(kb[1][0].url, /\?tab=chats&chat=-1001234567/);
 });
 
 test('aprovação pelo painel atualiza o log original e notifica o dono', async () => {
@@ -450,6 +451,9 @@ test('aprovação pelo painel atualiza o log original e notifica o dono', async 
   assert.ok(editCall, 'deve editar a mensagem de log enviada anteriormente');
   assert.equal(editCall.p.chat_id, -1001999999);
   assert.match(editCall.p.text, /Solicitação APROVADA/);
+  const approvedKb = editCall.p.reply_markup.inline_keyboard;
+  assert.equal(approvedKb[1][0].web_app, undefined);
+  assert.match(approvedKb[1][0].url, /\?tab=chats&chat=-1001234567/);
 
   const ownerNotice = calls.find(c => c.name === 'sendMessage' && c.p.chat_id === 42);
   assert.ok(ownerNotice, 'deve notificar o dono do cadastro');

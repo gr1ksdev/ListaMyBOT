@@ -63,7 +63,10 @@ export function chatSubmissionKeyboard(chatId, status = 'pending') {
           { text: '❌ Alterar para Rejeitado', callback_data: `chat_adm:reject:${chatId}`, style: 'danger' }
         ],
         [
-          { text: '📊 Abrir no Painel', web_app: { url: panelUrl } }
+          // Inline buttons with `web_app` are rejected in groups/topics
+          // (BUTTON_TYPE_INVALID). The log lives in a forum topic, so open the
+          // panel through a regular URL instead.
+          { text: '📊 Abrir no Painel', url: panelUrl }
         ]
       ]
     };
@@ -87,7 +90,7 @@ export function chatSubmissionKeyboard(chatId, status = 'pending') {
         { text: '❌ Rejeitar', callback_data: `chat_adm:reject:${chatId}`, style: 'danger' }
       ],
       [
-        { text: '📊 Abrir no Painel', web_app: { url: panelUrl} }
+        { text: '📊 Abrir no Painel', url: panelUrl }
       ]
     ]
   };
