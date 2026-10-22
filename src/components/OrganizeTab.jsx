@@ -130,6 +130,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
     setRemovedAdIds(new Set());
 
     const savedLayout = Array.isArray(s.buttonLayout?.rows) ? s.buttonLayout.rows : [];
+    const hadSavedLayout = savedLayout.length > 0;
     let initialRows = savedLayout.length
       ? savedLayout
           .map((row) =>
@@ -155,7 +156,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
           .filter((row) => row.length)
       : [];
 
-    if (!initialRows.length) {
+    if (!initialRows.length && !hadSavedLayout) {
       initialRows = defaultLayoutRows().map((row) =>
         row.map(() => ({ key: nextKey(), kind: 'auto' }))
       );
@@ -328,9 +329,7 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
           }
         }
       }
-      next = next.filter((row) => row.length);
-      if (!next.length) next = [[{ key: nextKey(), kind: 'auto' }]];
-      return next;
+      return next.filter((row) => row.length);
     });
     setCellEditor(null);
   };
@@ -907,6 +906,12 @@ export function OrganizeTab({ data, onRefresh, isDemo, onSyncVersion }) {
                   fica fora desta mensagem e não gera uma segunda parte. O rodapé não conta nesse
                   limite.
                 </p>
+                {layoutChatCells === 0 && (
+                  <p className="text-[11px] leading-relaxed rounded-xl border border-rose-500/25 bg-rose-500/10 p-2.5 text-rose-200">
+                    O layout está sem botões de C/G. Adicione uma linha se quiser canais ou grupos
+                    nesta lista.
+                  </p>
+                )}
                 {layoutAdCells > ads.length && (
                   <p className="text-[11px] leading-relaxed rounded-xl border border-rose-500/25 bg-rose-500/10 p-2.5 text-rose-200">
                     Há {layoutAdCells} posições de divulgação para {ads.length} divulgação(ões)
